@@ -14,7 +14,7 @@ Optionally quantize/clamp activations
 import torch.nn as nn
 
 import ai8x
-import ai8x_fire
+import ai8x_blocks
 
 
 class AI85NetWide(nn.Module):
