@@ -41,3 +41,43 @@ class Fire(nn.Module):
             self.expand1x1_layer(x),
             self.expand3x3_layer(x)
         ], 1)
+
+
+class NoResidual(nn.Module):
+    """
+    Do nothing
+    """
+    def forward(self, *x):  # pylint: disable=arguments-differ, no-self-use
+        """Forward prop"""
+        return x[0]
+
+
+class Bottleneck(nn.Module):
+    """
+    AI8X - Bottleneck Layer
+    """
+    def __init__(self, in_channels, out_channels, expansion_factor, stride=1, bias=False,
+                 **kwargs):
+        super().__init__()
+        self.stride = stride
+        hidden_channels = int(round(in_channels * expansion_factor))
+        if hidden_channels == in_channels:
+            self.conv1 = ai8x.Empty()
+        else:
+            self.conv1 = ai8x.FusedConv2dBNReLU(in_channels, hidden_channels, 1, padding=0,
+                                                bias=bias, **kwargs)
+        self.conv2 = ai8x.FusedDepthwiseConv2dBNReLU(hidden_channels, hidden_channels, 3,
+                                                     padding=1, stride=stride, bias=bias, **kwargs)
+        self.conv3 = ai8x.FusedConv2dBN(hidden_channels, out_channels, 1, bias=bias, **kwargs)
+
+        if (stride == 1) and (in_channels == out_channels):
+            self.resid = ai8x.Add()
+        else:
+            self.resid = NoResidual()
+
+    def forward(self, x):  # pylint: disable=arguments-differ
+        """Forward prop"""
+        y = self.conv1(x)
+        y = self.conv2(y)
+        y = self.conv3(y)
+        return self.resid(y, x)

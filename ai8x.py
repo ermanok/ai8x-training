@@ -391,7 +391,7 @@ class QuantizationAwareModule(nn.Module):
             self.weight_bits = nn.Parameter(torch.Tensor([0]), requires_grad=False)
             self.bias_bits = nn.Parameter(torch.Tensor([0]), requires_grad=False)
             self.quantize_activation = nn.Parameter(torch.Tensor([False]), requires_grad=False)
-            self.adjust_output_shift = nn.Parameter(torch.Tensor([False]), requires_grad=False)
+            self.adjust_output_shift = nn.Parameter(torch.Tensor([True]), requires_grad=False)
         elif weight_bits in [1, 2, 4, 8] and bias_bits == 8 and quantize_activation:
             self.weight_bits = nn.Parameter(torch.Tensor([weight_bits]), requires_grad=False)
             self.bias_bits = nn.Parameter(torch.Tensor([bias_bits]), requires_grad=False)
@@ -467,6 +467,7 @@ class Conv2d(QuantizationAwareModule):
             padding=0,
             bias=True,
             activation=None,
+            depthwise=False,
             wide=False,
             batchnorm=None,
             weight_bits=None,
@@ -543,16 +544,18 @@ class Conv2d(QuantizationAwareModule):
 
             assert kernel_size == 3 or dev.device != 84 and kernel_size == 1
 
+            groups = 1 if not depthwise else in_channels
+
             if op == 'Conv2d':
                 opn = nn.Conv2d(in_channels, out_channels,
                                 kernel_size=kernel_size, stride=stride,
-                                padding=padding, bias=bias)
+                                padding=padding, bias=bias, groups=groups)
             elif op == 'ConvTranspose2d':
                 assert dev.device != 84
                 opn = nn.ConvTranspose2d(in_channels, out_channels,
                                          kernel_size=kernel_size, stride=stride,
                                          output_padding=1,
-                                         padding=padding, bias=bias)
+                                         padding=padding, bias=bias, groups=groups)
             else:
                 raise ValueError('Unsupported operation')
         else:
@@ -691,6 +694,14 @@ class FusedConv2dReLU(Conv2d):
         super().__init__(*args, activation='ReLU', **kwargs)
 
 
+class FusedConv2dBN(Conv2d):
+    """
+    AI8X - Fused 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, batchnorm='NoAffine', **kwargs)
+
+
 class FusedConv2dBNReLU(FusedConv2dReLU):
     """
     AI8X - Fused 2D Convolution and BatchNorm and ReLU
@@ -705,6 +716,22 @@ class FusedConv2dAbs(Conv2d):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, activation='Abs', **kwargs)
+
+
+class FusedDepthwiseConv2dReLU(Conv2d):
+    """
+    AI8X - Fused 2D Depthwise Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, activation='ReLU', depthwise=True, **kwargs)
+
+
+class FusedDepthwiseConv2dBNReLU(FusedDepthwiseConv2dReLU):
+    """
+    AI8X - Fused 2D Convolution and BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, batchnorm='NoAffine', **kwargs)
 
 
 class ConvTranspose2d(Conv2d):
