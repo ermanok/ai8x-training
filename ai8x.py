@@ -391,7 +391,7 @@ class QuantizationAwareModule(nn.Module):
             self.weight_bits = nn.Parameter(torch.Tensor([0]), requires_grad=False)
             self.bias_bits = nn.Parameter(torch.Tensor([0]), requires_grad=False)
             self.quantize_activation = nn.Parameter(torch.Tensor([False]), requires_grad=False)
-            self.adjust_output_shift = nn.Parameter(torch.Tensor([True]), requires_grad=False)
+            self.adjust_output_shift = nn.Parameter(torch.Tensor([False]), requires_grad=False)
         elif weight_bits in [1, 2, 4, 8] and bias_bits == 8 and quantize_activation:
             self.weight_bits = nn.Parameter(torch.Tensor([weight_bits]), requires_grad=False)
             self.bias_bits = nn.Parameter(torch.Tensor([bias_bits]), requires_grad=False)
@@ -431,6 +431,7 @@ class QuantizationAwareModule(nn.Module):
             x = self.clamp_pool(self.quantize_pool(self.pool(x)))
         if self.op is not None:
             out_shift = self.calc_out_shift(self.op.weight.detach(), self.output_shift.detach())
+
             weight_scale = self.calc_weight_scale(out_shift)
             out_scale = self.calc_out_scale(out_shift)
 
@@ -443,9 +444,12 @@ class QuantizationAwareModule(nn.Module):
 
             x = self.func(x, weight, bias, self.op.stride, self.op.padding,
                           self.op.dilation, self.op.groups)
+            self.scale(x, out_scale)
             if self.bn is not None:
                 x = self.bn(x)
-            x = self.clamp(self.quantize(self.activate(self.scale(x, out_scale))))
+                x /= 6.0
+
+            x = self.clamp(self.quantize(self.activate(x)))
         return x
 
 
@@ -729,6 +733,30 @@ class FusedDepthwiseConv2dReLU(Conv2d):
 class FusedDepthwiseConv2dBNReLU(FusedDepthwiseConv2dReLU):
     """
     AI8X - Fused 2D Convolution and BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, batchnorm='NoAffine', **kwargs)
+
+
+class FusedAvgPoolDepthwiseConv2d(Conv2d):
+    """
+    AI8X - Fused 2D Avg Pool, 2D Convolution and activation ('ReLU', 'Abs', None)
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, pooling='Avg', depthwise=True, **kwargs)
+
+
+class FusedAvgPoolDepthwiseConv2dReLU(FusedAvgPoolDepthwiseConv2d):
+    """
+    AI8X - Fused 2D Avg Pool, 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, activation='ReLU', **kwargs)
+
+
+class FusedAvgPoolDepthwiseConv2dBNReLU(FusedAvgPoolDepthwiseConv2dReLU):
+    """
+    AI8X - Fused 2D Avg Pool, 2D Convolution, BatchNorm and ReLU
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, batchnorm='NoAffine', **kwargs)
@@ -1404,8 +1432,8 @@ def fuse_bn_layers(m):
                 w_new = w * (beta / r_std).reshape((w.shape[0],) + (1,) * (len(w.shape) - 1))
                 b_new = (b - r_mean)/r_std * beta + gamma
 
-                target_attr.op.weight.data = w_new
-                target_attr.op.bias.data = b_new
+                target_attr.op.weight.data = w_new / 6.0
+                target_attr.op.bias.data = b_new / 6.0
                 target_attr.bn = None
                 setattr(m, attr_str, target_attr)
 

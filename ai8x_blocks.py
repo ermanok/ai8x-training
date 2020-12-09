@@ -66,8 +66,15 @@ class Bottleneck(nn.Module):
         else:
             self.conv1 = ai8x.FusedConv2dBNReLU(in_channels, hidden_channels, 1, padding=0,
                                                 bias=bias, **kwargs)
-        self.conv2 = ai8x.FusedDepthwiseConv2dBNReLU(hidden_channels, hidden_channels, 3,
-                                                     padding=1, stride=stride, bias=bias, **kwargs)
+        if stride == 1:
+            self.conv2 = ai8x.FusedDepthwiseConv2dBNReLU(hidden_channels, hidden_channels, 3,
+                                                         padding=1, stride=stride, bias=bias,
+                                                         **kwargs)
+        else:
+            self.conv2 = ai8x.FusedAvgPoolDepthwiseConv2dBNReLU(hidden_channels, hidden_channels,
+                                                                3, padding=1, pool_size=stride,
+                                                                pool_stride=stride, bias=bias,
+                                                                **kwargs)
         self.conv3 = ai8x.FusedConv2dBN(hidden_channels, out_channels, 1, bias=bias, **kwargs)
 
         if (stride == 1) and (in_channels == out_channels):
