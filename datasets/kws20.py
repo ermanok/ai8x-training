@@ -75,7 +75,7 @@ class KWS:
                   'up': 30, 'visual': 31, 'wow': 32, 'yes': 33, 'zero': 34}
 
     def __init__(self, root, classes, d_type, t_type, transform=None, quantization_scheme=None,
-                 augmentation=None, download=False, save_unquantized=False):
+                 augmentation=None, silence_ratio=0., download=False, save_unquantized=False):
 
         self.root = root
         self.classes = classes
@@ -87,6 +87,9 @@ class KWS:
         self.__parse_quantization(quantization_scheme)
         self.__parse_augmentation(augmentation)
 
+        self.silence_ratio = silence_ratio
+        self.noise_audio_list = []
+
         if not self.save_unquantized:
             self.data_file = 'dataset2.pt'
         else:
@@ -95,27 +98,29 @@ class KWS:
         if download:
             self.__download()
 
-        print(self.t_type)
         self.data, self.targets, self.data_type = torch.load(os.path.join(
             self.processed_folder, self.data_file))
 
-        print(self.d_type)
-        print(self.data.shape)
+        print(f'{self.d_type} dataset size: {self.data.shape[0]}x'\
+              f'{self.data.shape[1]}x{self.data.shape[2]}')
 
         self.__filter_dtype()
         self.__filter_classes()
 
     @property
     def raw_folder(self):
-        """Folder for the raw data.
-        """
+        """Folder for the raw data."""
         return os.path.join(self.root, self.__class__.__name__, 'raw')
 
     @property
     def processed_folder(self):
-        """Folder for the processed data.
-        """
+        """Folder for the processed data."""
         return os.path.join(self.root, self.__class__.__name__, 'processed')
+
+    @property
+    def noise_folder(self):
+        """Folder for the noise recordings."""
+        return os.path.join(self.raw_folder, '_background_noise_')
 
     def __parse_quantization(self, quantization_scheme):
         if quantization_scheme:
@@ -141,6 +146,8 @@ class KWS:
                       'It is set to 0.')
                 self.augmentation['aug_num'] = 0
             elif self.augmentation['aug_num'] != 0:
+                if 'use_dataset_noise' not in augmentation:
+                    self.augmentation['use_dataset_noise'] = False
                 if 'noise_var' not in augmentation:
                     print('No key `noise_var` in input augmentation dictionary! ',
                           'It is set to defaults: [Min: 0., Max: 1.]')
@@ -269,14 +276,13 @@ class KWS:
             print('Unknown data type: %s' % self.d_type)
             return
 
-        print(self.data.shape)
         self.data = self.data[idx_to_select, :]
         self.targets = self.targets[idx_to_select, :]
         del self.data_type
 
     def __filter_classes(self):
         print('\n')
-        initial_new_class_label = len(self.class_dict)
+        initial_new_class_label = len(self.class_dict) + 1
         new_class_label = initial_new_class_label
         for c in self.classes:
             if c not in self.class_dict.keys():
@@ -287,6 +293,13 @@ class KWS:
             num_elems = (self.targets == self.class_dict[c]).cpu().sum()
             print('Number of elements in class %s: %d' % (c, num_elems))
             self.targets[(self.targets == self.class_dict[c])] = new_class_label
+            new_class_label += 1
+
+        if self.silence_ratio != 0:
+            print('Class silence, %d' % (len(self.class_dict)))
+            num_elems = (self.targets == len(self.class_dict)).cpu().sum()
+            print('Number of elements in class silence: %d' % (num_elems))
+            self.targets[(self.targets == len(self.class_dict))] = new_class_label
             new_class_label += 1
 
         num_elems = (self.targets < initial_new_class_label).cpu().sum()
@@ -316,6 +329,21 @@ class KWS:
         """
         coeff = noise_var_coeff * np.mean(np.abs(audio))
         noisy_audio = audio + coeff * np.random.randn(len(audio))
+        return noisy_audio
+
+    def add_dataset_noise(self, audio, noise_var_coeff):
+        """Adds samples from noise audio in the dataset.
+        """
+        noise_idx = np.random.randint(0, len(self.noise_audio_list))
+        start_idx = np.random.randint(0, len(self.noise_audio_list[noise_idx]) - len(audio))
+        noise = self.noise_audio_list[noise_idx][start_idx:(start_idx+len(audio))]
+
+        coeff = noise_var_coeff * np.mean(np.abs(audio)) / np.mean(np.abs(noise))
+        if coeff != 0:
+            noisy_audio = coeff * noise + audio
+        else:
+            noisy_audio = noise + audio
+
         return noisy_audio
 
     @staticmethod
@@ -350,18 +378,22 @@ class KWS:
 
         aug_audio = tsm.wsola(audio, random_strech_coeff)
         aug_audio = self.shift(aug_audio, random_shift_time, fs)
-        aug_audio = self.add_white_noise(aug_audio, random_noise_var_coeff)
+        if self.augmentation['use_dataset_noise']:
+            aug_audio = self.add_dataset_noise(aug_audio, random_noise_var_coeff)
+        else:
+            aug_audio = self.add_white_noise(aug_audio, random_noise_var_coeff)
         if verbose:
             print(f'random_noise_var_coeff: {random_noise_var_coeff:.2f}\nrandom_shift_time: \
                     {random_shift_time:.2f}\nrandom_strech_coeff: {random_strech_coeff:.2f}')
         return aug_audio
 
-    def augment_multiple(self, audio, fs, n_augment, verbose=False):
+    def augment_multiple(self, audio, fs, n_augment, add_self=True, verbose=False):
         """Calls `augment` function for n_augment times for given audio data.
         Finally the original audio is added to have (n_augment+1) audio data.
         """
         aug_audio = [self.augment(audio, fs, verbose=verbose) for i in range(n_augment)]
-        aug_audio.insert(0, audio)
+        if add_self:
+            aug_audio.insert(0, audio)
         return aug_audio
 
     @staticmethod
@@ -401,9 +433,22 @@ class KWS:
         with warnings.catch_warnings():
             warnings.simplefilter('error')
 
+            if self.augmentation['use_dataset_noise']:
+                noise_list = []
+                for f in os.listdir(self.noise_folder):
+                    if f.endswith('.wav'):
+                        noise_list.append(f)
+
+                for f in noise_list:
+                    noise_path = os.path.join(self.noise_folder, f)
+                    record, fs = librosa.load(noise_path, offset=0, sr=None)
+                    self.noise_audio_list.append(record)
+
             lst = sorted(os.listdir(self.raw_folder))
             labels = [d for d in lst if os.path.isdir(os.path.join(self.raw_folder, d))
                       and d[0].isalpha()]
+            if self.silence_ratio > 0:
+                labels.append('silence')
 
             # PARAMETERS
             overlap = int(np.ceil(row_len * overlap_ratio))
@@ -412,15 +457,26 @@ class KWS:
             print('data_len: %s' % data_len)
 
             # show the size of dataset for each keyword
+            num_total_records = 0
             print('------------- Label Size ---------------')
             for i, label in enumerate(labels):
-                record_list = os.listdir(os.path.join(self.raw_folder, label))
+                if label != 'silence':
+                    record_list = os.listdir(os.path.join(self.raw_folder, label))
+                    num_total_records += len(record_list)
+                else:
+                    record_list = [None] * int(self.silence_ratio * num_total_records)
                 print('%8s:  \t%d' % (label, len(record_list)))
             print('------------------------------------------')
 
+            train_count = 0
+            test_count = 0
             for i, label in enumerate(labels):
+                data_idx = 0
                 print(f'Processing the label: {label}. {i + 1} of {len(labels)}')
-                record_list = sorted(os.listdir(os.path.join(self.raw_folder, label)))
+                if label != 'silence':
+                    record_list = sorted(os.listdir(os.path.join(self.raw_folder, label)))
+                else:
+                    record_list = [None] * int(self.silence_ratio * num_total_records)
 
                 # dimension: row_length x number_of_rows
                 if not self.save_unquantized:
@@ -436,26 +492,46 @@ class KWS:
                                      dtype=np.uint8)
 
                 time_s = time.time()
-                train_count = 0
-                test_count = 0
                 for r, record_name in enumerate(record_list):
                     if r % 1000 == 0:
                         print('\t%d of %d' % (r + 1, len(record_list)))
 
-                    if hash(record_name) % 10 < 9:
-                        d_typ = np.uint8(0)  # train+val
-                        train_count += 1
+                    if label != 'silence':
+                        if hash(record_name) % 10 < 9:
+                            d_typ = np.uint8(0)  # train+val
+                            train_count += 1
+                        else:
+                            d_typ = np.uint8(1)  # test
+                            test_count += 1
                     else:
-                        d_typ = np.uint8(1)  # test
-                        test_count += 1
+                        if np.random.uniform() < 0.9:
+                            d_typ = np.uint8(0)  # train+val
+                            train_count += 1
+                        else:
+                            d_typ = np.uint8(1)  # test
+                            test_count += 1
 
-                    record_pth = os.path.join(self.raw_folder, label, record_name)
-                    record, fs = librosa.load(record_pth, offset=0, sr=None)
-                    audio_seq_list = self.augment_multiple(record, fs,
-                                                           self.augmentation['aug_num'])
-                    for n_a, audio_seq in enumerate(audio_seq_list):
+                    if record_name is not None:
+                        record_pth = os.path.join(self.raw_folder, label, record_name)
+                        record, fs = librosa.load(record_pth, offset=0, sr=None)
+                        add_self = True
+                    else:
+                        record = np.zeros(exp_len, )
+                        add_self = False
+
+                    if d_typ == 0:
+                        audio_seq_list = self.augment_multiple(record, fs,
+                                                               self.augmentation['aug_num'],
+                                                               add_self=add_self)
+                    else:
+                        if record_name is not None:
+                            audio_seq_list = [record]
+                        else:
+                            self.augment_multiple(record, fs, 1, add_self=add_self)
+
+                    for _, audio_seq in enumerate(audio_seq_list):
                         # store set type: train+validate or test
-                        data_type[(self.augmentation['aug_num'] + 1) * r + n_a, 0] = d_typ
+                        data_type[data_idx, 0] = d_typ
 
                         # Write audio 128x128=16384 samples without overlap
                         for n_r in range(num_rows):
@@ -465,7 +541,6 @@ class KWS:
                             # pad zero if the length of the chunk is smaller than row_len
                             audio_chunk = np.pad(audio_chunk, [0, row_len-audio_chunk.size])
                             # store input data after quantization
-                            data_idx = (self.augmentation['aug_num'] + 1) * r + n_a
                             if not self.save_unquantized:
                                 data_in[data_idx, :, n_r] = \
                                     KWS.quantize_audio(audio_chunk,
@@ -475,7 +550,12 @@ class KWS:
                             else:
                                 data_in[data_idx, :, n_r] = audio_chunk
 
+                        data_idx += 1
+
                 dur = time.time() - time_s
+                data_in = data_in[:data_idx]
+                data_class = data_class[:data_idx]
+                data_type = data_type[:data_idx]
                 print('Done in %.3fsecs.' % dur)
                 print(data_in.shape)
                 time_s = time.time()
@@ -511,15 +591,18 @@ class KWS_20(KWS):
         return self.__class__.__name__
 
 
-def KWS_get_datasets(data, load_train=True, load_test=True, num_classes=6):
+def KWS_get_datasets(data, load_train=True, load_test=True, num_classes=6, silence_ratio=0.):
     """
     Load the folded 1D version of SpeechCom dataset
 
     The dataset is loaded from the archive file, so the file is required for this version.
 
-    The dataset originally includes 30 keywords. A dataset is formed with 7 or 21 classes which
-    includes 6 or 20 of the original keywords and the rest of the
-    dataset is used to form the last class, i.e class of the others.
+    The dataset originally includes 30 keywords. A dataset is formed with 7, 11 or 21 classes which
+    includes 6, 10 or 20 of the original keywords and the rest of the dataset is used to form the
+    last class, i.e class of the others. If silence ratio is set to a positive value, the
+    generated dataset has one additional class `silence` which includes samples from configured
+    noise data.
+
     The dataset is split into training+validation and test sets. 90:10 training+validation:test
     split is used by default.
 
@@ -533,22 +616,25 @@ def KWS_get_datasets(data, load_train=True, load_test=True, num_classes=6):
         ai8x.normalize(args=args)
     ])
 
+    augmentation = {'aug_num': 2}
+    quantization_scheme = {'compand': False, 'mu': 10}
+
     if num_classes == 6:
         classes = ['up', 'down', 'left', 'right', 'stop', 'go']
+    elif num_classes == 10:
+        classes = ['up', 'down', 'left', 'right', 'stop', 'go', 'yes', 'no', 'on', 'off']
+        augmentation['use_dataset_noise'] = True
     elif num_classes == 20:
         classes = ['up', 'down', 'left', 'right', 'stop', 'go', 'yes', 'no', 'on', 'off', 'one',
                    'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'zero']
     else:
         raise ValueError(f'Unsupported num_classes {num_classes}')
 
-    augmentation = {'aug_num': 2}
-    quantization_scheme = {'compand': False, 'mu': 10}
-
     if load_train:
         train_dataset = KWS(root=data_dir, classes=classes, d_type='train',
                             transform=transform, t_type='keyword',
                             quantization_scheme=quantization_scheme,
-                            augmentation=augmentation, download=True)
+                            augmentation=augmentation, silence_ratio=silence_ratio, download=True)
     else:
         train_dataset = None
 
@@ -556,7 +642,7 @@ def KWS_get_datasets(data, load_train=True, load_test=True, num_classes=6):
         test_dataset = KWS(root=data_dir, classes=classes, d_type='test',
                            transform=transform, t_type='keyword',
                            quantization_scheme=quantization_scheme,
-                           augmentation=augmentation, download=True)
+                           augmentation=augmentation, silence_ratio=silence_ratio, download=True)
 
         if args.truncate_testset:
             test_dataset.data = test_dataset.data[:1]
@@ -564,6 +650,25 @@ def KWS_get_datasets(data, load_train=True, load_test=True, num_classes=6):
         test_dataset = None
 
     return train_dataset, test_dataset
+
+
+def KWS_10_get_datasets(data, load_train=True, load_test=True):
+    """
+    Load the folded 1D version of SpeechCom dataset for 10 classes
+
+    The dataset is loaded from the archive file, so the file is required for this version.
+
+    The dataset originally includes 35 keywords. A dataset is formed with 11 classes which includes
+    20 of the original keywords and the rest of the dataset is used to form the last class, i.e.,
+    class of the others.
+    The dataset is split into training+validation and test sets. 90:10 training+validation:test
+    split is used by default.
+
+    Data is augmented to 3x duplicate data by random stretch/shift and randomly adding noise where
+    the stretching coefficient, shift amount and noise variance are randomly selected between
+    0.8 and 1.3, -0.1 and 0.1, 0 and 1, respectively.
+    """
+    return KWS_get_datasets(data, load_train, load_test, num_classes=10, silence_ratio=0.1)
 
 
 def KWS_20_get_datasets(data, load_train=True, load_test=True):
@@ -647,6 +752,13 @@ datasets = [
         'output': (0, 1, 2, 3, 4, 5, 6),
         'weight': (1, 1, 1, 1, 1, 1, 0.06),
         'loader': KWS_get_datasets,
+    },
+    {
+        'name': 'KWS_10',  # 10 keywords
+        'input': (128, 128, 1),
+        'output': (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+        'weight': (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.6, 0.06),
+        'loader': KWS_10_get_datasets,
     },
     {
         'name': 'KWS_20',  # 20 keywords
