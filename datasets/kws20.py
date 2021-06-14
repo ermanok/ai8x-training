@@ -101,7 +101,7 @@ class KWS:
         self.data, self.targets, self.data_type = torch.load(os.path.join(
             self.processed_folder, self.data_file))
 
-        print(f'{self.d_type} dataset size: {self.data.shape[0]}x'\
+        print(f'{self.d_type} dataset size: {self.data.shape[0]}x'
               f'{self.data.shape[1]}x{self.data.shape[2]}')
 
         self.__filter_dtype()
