@@ -34,9 +34,14 @@ class AI87MobileNetV2(nn.Module):
             dimensions=(32, 32),  # pylint: disable=unused-argument
             bias=False,
             depthwise_bias=False,
+            add_classifier=True,
+            out_layers=None,
             **kwargs
     ):
         super().__init__()
+
+        self.add_classifier = add_classifier
+        self.out_layers = out_layers # none to return last layer
 
         self.pre_stage = ai8x.FusedConv2dBNReLU(num_channels, bottleneck_settings[0][1], 3,
                                                 padding=1, stride=pre_layer_stride,
@@ -49,10 +54,11 @@ class AI87MobileNetV2(nn.Module):
         self.post_stage = ai8x.FusedConv2dReLU(bottleneck_settings[-1][2], last_layer_width, 1,
                                                padding=0, stride=1, bias=False, **kwargs)
 
-        self.classifier = ai8x.FusedAvgPoolConv2d(last_layer_width, num_classes, 1, padding=0,
-                                                  stride=1, pool_size=avg_pool_size,
-                                                  pool_stride=avg_pool_size, bias=False, wide=True,
-                                                  **kwargs)
+        if self.add_classifier:
+            self.classifier = ai8x.FusedAvgPoolConv2d(last_layer_width, num_classes, 1, padding=0,
+                                                      stride=1, pool_size=avg_pool_size,
+                                                      pool_stride=avg_pool_size, bias=False,
+                                                      wide=True, **kwargs)
 
     def _create_bottleneck_stage(self, setting, bias, depthwise_bias, **kwargs):
         """Function to create bottlencek stage. Setting format is:
@@ -81,13 +87,35 @@ class AI87MobileNetV2(nn.Module):
 
     def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
-        x = self.pre_stage(x)
-        for stage in self.feature_stage:
-            x = stage(x)
-        x = self.post_stage(x)
-        x = self.classifier(x)
-        x = x.view(x.size(0), -1)
-        return x
+        if self.out_layers:
+            out_list = []
+            
+            x = self.pre_stage(x)
+            for n_stage, stage in enumerate(self.feature_stage):
+                x = stage(x)
+                if (n_stage+1) in self.out_layers:
+                    out_list.append(x)
+            x = self.post_stage(x)
+            
+            if self.add_classifier:
+                x = self.classifier(x)
+                x = x.view(x.size(0), -1)
+            
+            out_list.append(x)
+            
+            return tuple(out_list)
+                    
+        else:
+            x = self.pre_stage(x)
+            for stage in self.feature_stage:
+                x = stage(x)
+            x = self.post_stage(x)
+            
+            if self.add_classifier:
+                x = self.classifier(x)
+                x = x.view(x.size(0), -1)
+        
+            return x
 
 
 def ai87netmobilenetv2(pretrained=False, **kwargs):
@@ -108,7 +136,7 @@ def ai87netmobilenetv2(pretrained=False, **kwargs):
     ]
 
     return AI87MobileNetV2(pre_layer_stride=2, bottleneck_settings=bottleneck_settings,
-                           last_layer_width=1280, avg_pool_size=7, dimensions=(224, 244), **kwargs)
+                           last_layer_width=1280, avg_pool_size=7, dimensions=(224, 224), **kwargs)
 
 
 def ai87netmobilenetv2cifar100(pretrained=False, **kwargs):
