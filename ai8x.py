@@ -121,7 +121,7 @@ class Floor(nn.Module):
     Post-pooling integer quantization module
     Apply the custom autograd function
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return FloorFunction.apply(x)
 
@@ -131,7 +131,7 @@ class AvgPoolFloor(nn.Module):
     Post-pooling integer quantization module
     Apply the custom autograd function
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return AvgPoolFloorFunction.apply(x)
 
@@ -141,7 +141,7 @@ class FloorONNX(nn.Module):
     Post-pooling integer quantization module
     Apply the custom autograd function
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return x.floor()
 
@@ -170,7 +170,7 @@ class Round(nn.Module):
     Post-pooling integer quantization module
     Apply the custom autograd function
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return RoundFunction.apply(x)
 
@@ -187,7 +187,8 @@ class Clamp(nn.Module):
 
     def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
-        return x.clamp(min=self.min_val, max=self.max_val)
+        x = x.clamp(min=self.min_val)
+        return x.clamp(max=self.max_val)
 
 
 class Scaler(nn.Module):
@@ -195,7 +196,7 @@ class Scaler(nn.Module):
     Scaler module that considers integer quantization
     Apply the custom autograd function
     """
-    def forward(self, x, s):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x, s):  # pylint: disable=arguments-differ
         """Forward prop"""
         if dev.simulate:
             return FloorFunction.apply(x*s)
@@ -207,7 +208,7 @@ class ScalerONNX(nn.Module):
     Scaler module that considers integer quantization
     Apply the custom autograd function
     """
-    def forward(self, x, s):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x, s):  # pylint: disable=arguments-differ
         """Forward prop"""
         if dev.simulate:
             return x.mul(s).floor()
@@ -218,7 +219,7 @@ class RoundQat(nn.Module):
     """
     Round function for AvgPool in QAT mode
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         factor = 2**(dev.ACTIVATION_BITS - 1)
         return RoundFunction.apply(x.mul(factor)).div(factor)
@@ -228,7 +229,7 @@ class RoundQatONNX(nn.Module):
     """
     Round function for AvgPool in QAT mode
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         factor = 2**(dev.ACTIVATION_BITS - 1)
         return x.mul(factor).round().div(factor)
@@ -238,7 +239,7 @@ class FloorQat(nn.Module):
     """
     Floor function for AvgPool in QAT mode
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         factor = 2**(dev.ACTIVATION_BITS - 1)
         return AvgPoolFloorFunction.apply(x.mul(factor)).div(factor)
@@ -248,7 +249,7 @@ class FloorQatONNX(nn.Module):
     """
     Floor function for AvgPool in QAT mode
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         factor = 2**(dev.ACTIVATION_BITS - 1)
         return x.mul(factor).floor().div(factor)
@@ -348,7 +349,7 @@ class OutputShiftSqueeze(nn.Module):
     """
     Return output_shift when not using quantization-aware training.
     """
-    def forward(self, _, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, _, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return x.squeeze(0)
 
@@ -361,7 +362,7 @@ class OutputShift(nn.Module):
         super().__init__()
         self.shift_quantile = shift_quantile
 
-    def forward(self, x, _):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x, _):  # pylint: disable=arguments-differ
         """Forward prop"""
         limit = torch.quantile(x.abs(), self.shift_quantile)
         return -(1./limit).log2().floor().clamp(min=-15., max=15.)
@@ -371,7 +372,7 @@ class OutputShiftONNX(nn.Module):
     """
     Calculate the clamped output shift when adjusting during quantization-aware training.
     """
-    def forward(self, x, _):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x, _):  # pylint: disable=arguments-differ
         """Forward prop"""
         return -(1./x.abs().max()).log2().floor().clamp(min=-15., max=15.)
 
@@ -380,7 +381,7 @@ class One(nn.Module):
     """
     Return 1.
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return torch.ones(1).to(x.device)
 
@@ -389,7 +390,7 @@ class WeightScale(nn.Module):
     """
     Calculate the weight scale (reciprocal of 2 to the power of the output shift)
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return 2.**(-x)
 
@@ -398,7 +399,7 @@ class OutputScale(nn.Module):
     """
     Calculate the output scale (2 to the power of the output shift)
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return 2.**x
 
@@ -407,7 +408,7 @@ class Abs(nn.Module):
     """
     Return abs(x)
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return torch.abs_(x)  # abs_() is the in-place version
 
@@ -416,7 +417,7 @@ class Empty(nn.Module):
     """
     Do nothing
     """
-    def forward(self, x):  # pylint: disable=arguments-differ, no-self-use
+    def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         return x
 
@@ -447,7 +448,6 @@ class QuantizationAwareModule(nn.Module):
             quantize_activation=False,
             pool=None,
             op=None,
-            func=None,
             bn=None,
             shift_quantile=1.0,
     ):
@@ -474,7 +474,6 @@ class QuantizationAwareModule(nn.Module):
 
         self.pool = pool
         self.op = op
-        self.func = func
         self.bn = bn
         self.pooling = pooling
 
@@ -538,17 +537,27 @@ class QuantizationAwareModule(nn.Module):
             weight_scale = self.calc_weight_scale(out_shift)
             out_scale = self.calc_out_scale(out_shift)
 
-            self.output_shift = nn.Parameter(out_shift.unsqueeze(0), requires_grad=False)
+            self.output_shift.data = out_shift.unsqueeze(0)
 
-            weight = self.clamp_weight(self.quantize_weight(weight_scale * self.op.weight))
-            bias = self.op.bias
-            if bias is not None:
-                bias = self.clamp_bias(self.quantize_bias(weight_scale * bias))
+            weights = self.op.weight.data
+            self.op.weight.data = \
+                self.clamp_weight(self.quantize_weight(weight_scale * self.op.weight))
+            if self.op.bias is not None:
+                biases = self.op.bias.data
+                self.op.bias.data = \
+                    self.clamp_bias(self.quantize_bias(weight_scale * self.op.bias))
 
-            x = self.func(x, weight, bias, self.op.stride, self.op.padding,
-                          self.op.dilation, self.op.groups)
+            x = self.op(x)
+
+            self.op.weight.data = weights
+            if self.op.bias is not None:
+                self.op.bias.data = biases
+
             if self.bn is not None:
-                x = self.bn(x) / 4
+                if len(x) > 1:
+                    x = self.bn(x) / 4.
+                else:
+                    x /= 4.
             if not self.wide:
                 # The device does not apply output shift in wide mode
                 x = self.scale(x, out_scale)
@@ -582,7 +591,7 @@ class Conv2d(QuantizationAwareModule):
             quantize_activation=False,
             groups=1,
             eps=1e-05,
-            momentum=0.05
+            momentum=0.05,
     ):
         assert not wide or activation is None
 
@@ -671,11 +680,6 @@ class Conv2d(QuantizationAwareModule):
         else:
             opn = None
 
-        if op == 'ConvTranspose2d':
-            func = nn.functional.conv_transpose2d
-        else:
-            func = nn.functional.conv2d
-
         super().__init__(
             pooling,
             activation,
@@ -685,7 +689,6 @@ class Conv2d(QuantizationAwareModule):
             quantize_activation,
             pool,
             opn,
-            func,
             bn,
         )
 
@@ -1027,13 +1030,6 @@ class SoftwareLinear(FusedSoftwareLinearReLU):
         super().__init__(in_features, out_features, relu=False, **kwargs)
 
 
-def func_linear(x, weight, bias, _stride, _padding, _dilation, _groups):
-    """
-    Wrapper for `nn.functional.linear` that takes the same number of arguments as Conv1d/Conv2d.
-    """
-    return nn.functional.linear(x, weight, bias)
-
-
 class Linear(QuantizationAwareModule):
     """
     Fused Linear and activation ('ReLU', 'Abs', None)
@@ -1068,7 +1064,6 @@ class Linear(QuantizationAwareModule):
             quantize_activation,
             None,
             nn.Linear(in_features, out_features, bias),
-            func_linear,
             None,
         )
 
@@ -1175,7 +1170,6 @@ class Conv1d(QuantizationAwareModule):
             quantize_activation,
             pool,
             opn,
-            nn.functional.conv1d,
             bn,
         )
 
@@ -1379,7 +1373,7 @@ class Sub(Eltwise):
         super().__init__(self.sub)
 
 
-class Xor(Eltwise):
+class BitwiseXor(Eltwise):
     """
     Elementwise Bitwise Xor Operation
     """
@@ -1393,13 +1387,13 @@ class Xor(Eltwise):
         a = a.add(.5).mul(256.).round().int()
         b = b.add(.5).mul(256.).round().int()
         # Bitwise XOR on integers, convert back to float
-        return torch.bitwise_or(a, b).div(256.).sub(.5)
+        return torch.bitwise_xor(a, b).div(256.).sub(.5)
 
     def __init__(self):
         super().__init__(self.bitwise_xor)
 
 
-class Or(Eltwise):
+class BitwiseOr(Eltwise):
     """
     Elementwise Bitwise Or Operation
     """
@@ -1412,7 +1406,7 @@ class Or(Eltwise):
         a = a.add(.5).mul(256.).round().int()
         b = b.add(.5).mul(256.).round().int()
         # Bitwise OR on integers, convert back to float
-        return torch.bitwise_xor(a, b).div(256.).sub(.5)
+        return torch.bitwise_or(a, b).div(256.).sub(.5)
 
     def __init__(self):
         super().__init__(self.bitwise_or)
