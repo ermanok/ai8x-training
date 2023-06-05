@@ -99,26 +99,50 @@ def imagenet_get_datasets(data, load_train=True, load_test=True, input_size=112,
     return train_dataset, test_dataset
 
 
-def imagenetfolder_get_datasets(data, load_train=True, load_test=True, input_size=112):
+def imagenet96_get_datasets(data, load_train=True, load_test=True):
     """
     Load the ImageNet 2012 Classification dataset using ImageFolder.
     _This function is used when the number of output classes is less than the default and
     it depends on a custom installation._
     """
-    return imagenet_get_datasets(data, load_train, load_test, input_size, folder=True)
+    return imagenet_get_datasets(data, load_train, load_test, input_size=96, folder=True)
+
+
+def imagenet112_get_datasets(data, load_train=True, load_test=True):
+    """
+    Load the ImageNet 2012 Classification dataset using ImageFolder.
+    _This function is used when the number of output classes is less than the default and
+    it depends on a custom installation._
+    """
+    return imagenet_get_datasets(data, load_train, load_test, input_size=112, folder=True)
+
+
+def imagenet256_get_datasets(data, load_train=True, load_test=True):
+    """
+    Load the ImageNet 2012 Classification dataset using ImageFolder.
+    _This function is used when the number of output classes is less than the default and
+    it depends on a custom installation._
+    """
+    return imagenet_get_datasets(data, load_train, load_test, input_size=256, folder=True)
 
 
 datasets = [
     {
-        'name': 'ImageNet',
+        'name': 'ImageNet96',
+        'input': (3, 96, 96),
+        'output': list(map(str, range(1000))),
+        'loader': imagenet_get_datasets,
+    },
+    {
+        'name': 'ImageNet112',
         'input': (3, 112, 112),
         'output': list(map(str, range(1000))),
         'loader': imagenet_get_datasets,
     },
     {
-        'name': 'ImageNet50',
-        'input': (3, 224, 224),
-        'output': list(map(str, range(50))),
-        'loader': imagenetfolder_get_datasets,
+        'name': 'ImageNet256',
+        'input': (3, 256, 256),
+        'output': list(map(str, range(1000))),
+        'loader': imagenet_get_datasets,
     },
 ]

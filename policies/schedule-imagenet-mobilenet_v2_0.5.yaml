@@ -1,0 +1,13 @@
+---
+lr_schedulers:
+  training_lr:
+    class: CosineAnnealingLR
+    T_max: 300
+    eta_min: 0.000001
+
+policies:
+  - lr_scheduler:
+      instance_name: training_lr
+    starting_epoch: 0
+    ending_epoch: 300
+    frequency: 1

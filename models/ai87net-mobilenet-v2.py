@@ -34,25 +34,45 @@ class AI87MobileNetV2(nn.Module):
             dimensions=(32, 32),  # pylint: disable=unused-argument
             bias=False,
             depthwise_bias=False,
+            add_post_stage_bn=False,
+            add_classifier=True,
             **kwargs
     ):
         super().__init__()
+        
+        print('***************************')
+        print(dimensions)
+        print('***************************')
+
+
+        self.add_classifier = add_classifier
 
         self.pre_stage = ai8x.FusedConv2dBNReLU(num_channels, bottleneck_settings[0][1], 3,
-                                                padding=1, stride=pre_layer_stride,
+                                                padding=1, stride=1,
                                                 bias=bias, **kwargs)
+
+        if pre_layer_stride == 1:
+            self.pre_stage_pool = ai8x.Empty()
+        else:
+            self.pre_stage_pool = nn.MaxPool2d(pre_layer_stride)
 
         self.feature_stage = nn.ModuleList([])
         for setting in bottleneck_settings:
             self._create_bottleneck_stage(setting, bias, depthwise_bias, **kwargs)
 
-        self.post_stage = ai8x.FusedConv2dReLU(bottleneck_settings[-1][2], last_layer_width, 1,
-                                               padding=0, stride=1, bias=False, **kwargs)
+        if add_post_stage_bn:
+            self.post_stage = ai8x.FusedConv2dBNReLU(bottleneck_settings[-1][2], last_layer_width,
+                                                     1, padding=0, stride=1, bias=True, **kwargs)
+        else:
+            self.post_stage = ai8x.FusedConv2dReLU(bottleneck_settings[-1][2], last_layer_width,
+                                                   1, padding=0, stride=1, bias=False, **kwargs)
 
-        self.classifier = ai8x.FusedAvgPoolConv2d(last_layer_width, num_classes, 1, padding=0,
-                                                  stride=1, pool_size=avg_pool_size,
-                                                  pool_stride=avg_pool_size, bias=False, wide=True,
-                                                  **kwargs)
+
+        if self.add_classifier:
+            self.classifier = ai8x.FusedAvgPoolConv2d(last_layer_width, num_classes, 1, padding=0,
+                                                      stride=1, pool_size=avg_pool_size,
+                                                      pool_stride=avg_pool_size, bias=False,
+                                                      wide=True, **kwargs)
 
     def _create_bottleneck_stage(self, setting, bias, depthwise_bias, **kwargs):
         """Function to create bottlencek stage. Setting format is:
@@ -82,15 +102,17 @@ class AI87MobileNetV2(nn.Module):
     def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
         x = self.pre_stage(x)
+        x = self.pre_stage_pool(x)
         for stage in self.feature_stage:
             x = stage(x)
         x = self.post_stage(x)
-        x = self.classifier(x)
-        x = x.view(x.size(0), -1)
+        if self.add_classifier:
+            x = self.classifier(x)
+            x = x.view(x.size(0), -1)
         return x
 
 
-def ai87netmobilenetv2(pretrained=False, **kwargs):
+def ai87netmobilenetv2(pretrained=False, dimensions=(224, 224), **kwargs):
     """
     Constructs a MobileNet v2 model described in [1].
     """
@@ -108,7 +130,7 @@ def ai87netmobilenetv2(pretrained=False, **kwargs):
     ]
 
     return AI87MobileNetV2(pre_layer_stride=2, bottleneck_settings=bottleneck_settings,
-                           last_layer_width=1280, avg_pool_size=7, dimensions=(224, 244), **kwargs)
+                           last_layer_width=1280, avg_pool_size=pool_size, **kwargs)
 
 
 def ai87netmobilenetv2cifar100(pretrained=False, **kwargs):
@@ -174,6 +196,34 @@ def ai87netmobilenetv2cifar100_m0_5(pretrained=False, **kwargs):
                            last_layer_width=640, avg_pool_size=4, depthwise_bias=True, **kwargs)
 
 
+def ai87netmobilenetv2imagenet_m0_5(pretrained=False, dimensions=(224,224), **kwargs):
+    """
+    Constructs a MobileNet v2 model for Cifar-100 dataset optimized for AI87.
+    """
+    assert not pretrained
+    # settings for bottleneck stages in format
+    # [num_repeat, in_channels, out_channels, stride, expansion_factor]
+    width_mult = 0.5
+    bottleneck_settings = [
+        [1, int(32*width_mult), int(16*width_mult), 1, 1],
+        [2, int(16*width_mult), int(24*width_mult), 2, 6],
+        [3, int(24*width_mult), int(32*width_mult), 2, 6],
+        [4, int(32*width_mult), int(64*width_mult), 2, 6],
+        [3, int(64*width_mult), int(96*width_mult), 1, 6],
+        [3, int(96*width_mult), int(160*width_mult), 2, 6],
+        [1, int(160*width_mult), int(320*width_mult), 1, 6]
+    ]
+
+    pool_size = int(dimensions[0]/32)
+    print('#############')
+    print(dimensions, pool_size)
+    print('#############')
+
+    return AI87MobileNetV2(pre_layer_stride=2, bottleneck_settings=bottleneck_settings,
+                           last_layer_width=int(1280), avg_pool_size=pool_size, 
+                           depthwise_bias=True, dimensions=dimensions, **kwargs)
+
+
 models = [
     {
         'name': 'ai87netmobilenetv2',
@@ -192,6 +242,11 @@ models = [
     },
     {
         'name': 'ai87netmobilenetv2cifar100_m0_5',
+        'min_input': 1,
+        'dim': 2,
+    },
+    {
+        'name': 'ai87netmobilenetv2imagenet_m0_5',
         'min_input': 1,
         'dim': 2,
     },
