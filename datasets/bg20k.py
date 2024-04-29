@@ -1,5 +1,7 @@
 import os
 import cv2
+import sys
+
 from torch.utils.data import Dataset
 
 
@@ -27,7 +29,20 @@ class BG20K(Dataset):
             print(f'Unknown data type: {d_type}')
             return
 
+        self.__check_dataset()
         self.__gen_data_paths()
+
+    def __check_dataset(self):
+        if os.path.exists(self.data_dir):
+            if len(os.listdir(self.data_dir)) > 0:
+                return True
+
+        print('\nDownload the archive file from: https://github.com/JizhiziLi/GFM to path \
+              [data_dir]/BK-20k.')
+        print('The download process may require additional authentication.')
+
+        sys.exit()
+
 
     def __gen_data_paths(self):
         file_list = sorted(os.listdir(self.data_dir))

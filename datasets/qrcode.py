@@ -6,10 +6,13 @@ import cv2
 import qrcode
 import albumentations as album
 from torch.utils.data import Dataset
+from torch.utils.data import ConcatDataset
 from torchvision import transforms
 
 from datasets.bg20k import BG20K
-from datasets.image_mixer_v2 import ImageMixer
+from datasets.image_mixer import ImageMixerWithObjBBox
+from datasets.image_mixer import ImageMixerWithObjSegment
+from datasets.image_mixer import ImageMixerWithObjBBoxKeyPts
 
 import ai8x
 from utils import object_detection_utils
@@ -34,25 +37,28 @@ class QRCodeGenerator(Dataset):
     min_num_words = 1
     max_num_words = 4
 
-    def __init__(self, root_dir, d_type, data_len, transform=None, augment_data=False):
+    def __init__(self, root_dir, d_type, data_len, transform=None, augment_data=False, segment_out=False, keypoint_out=False):
         self.data_len = data_len
         self.transform = transform
 
         self.random_text_list = []
         self.augment_data = augment_data
+        self.segment_out = segment_out
+        self.keypoint_out = keypoint_out
 
         self.__gen_random_words()
         
         if self.augment_data:
-            self.geometric_transforms = album.Compose([album.Affine(scale = (0.6, 1.3),
+            self.geometric_transforms = album.Compose([album.Affine(scale = (0.6, 1.),
                                                                 translate_percent=(0.2, 0.4),
                                                                 rotate=(-45, 45),
-                                                                shear=(-45, 45),
+                                                                #shear=(-45, 45),
                                                                 mode=cv2.BORDER_CONSTANT,
                                                                 fit_output=True,
-                                                                p=0.9),],
-                                                       #album.Perspective(scale=(0.05, 0.3), p=0.5),],
-                                                       bbox_params=album.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+                                                                p=0.9),
+                                                       album.Perspective(scale=(0.05, 0.2), p=0.5),],
+                                                       bbox_params=album.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+                                                       keypoint_params=album.KeypointParams(format='xy', remove_invisible=False))
             self.chromatic_transforms = album.Compose([album.RGBShift(r_shift_limit=64,
                                                                       g_shift_limit=64,
                                                                       b_shift_limit=64, 
@@ -66,7 +72,8 @@ class QRCodeGenerator(Dataset):
                                                                                  elementwise=True,
                                                                                  p=0.7),
                                                        album.MotionBlur(p=0.7),],
-                                                       bbox_params=album.BboxParams(format='pascal_voc', label_fields=['class_labels']))
+                                                       bbox_params=album.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+                                                       keypoint_params=album.KeypointParams(format='xy', remove_invisible=False))
 
     def __gen_random_words(self):
         random_word_gen = RandomWordGenerator()#RandomWords()
@@ -81,16 +88,25 @@ class QRCodeGenerator(Dataset):
     
     def __gen_qr(self, text):
         qr_size = random.randint(self.min_qr_size, self.max_qr_size)
+        border_size = max(2, int(qr_size / 5))
 
         qr = qrcode.QRCode(version=1,
                            error_correction=qrcode.constants.ERROR_CORRECT_L,
                            box_size=qr_size,
-                           border=2)
+                           border=border_size)
 
         qr.add_data(text)
         qr.make(fit=True)
 
         return qr.make_image(fill_color="black", back_color="white")
+
+    def __clamp_kpts(self, keypoints, img_width, img_height):
+        clamp_kpts = keypoints
+        
+        for idx1, kpt in enumerate(keypoints):
+            clamp_kpts[idx1] = (min(max(0, kpt[0]), img_width-1), min(max(0, kpt[1]), img_height-1))
+
+        return clamp_kpts
 
     def __len__(self):
         return self.data_len
@@ -98,32 +114,48 @@ class QRCodeGenerator(Dataset):
     def __getitem__(self, index):
         text = self.random_text_list[index]
         qr_image = self.__gen_qr(text)
-        qr_image = 250 * np.asarray(qr_image).astype(np.uint8) + 5# convert to numpy
+        qr_image = 245 * np.asarray(qr_image).astype(np.uint8) + 10# convert to numpy
 
         image = qr_image
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        start_x = start_y = 2
+        start_x = start_y = 0 #2
         boxes = [[start_x, start_y, start_x + qr_image.shape[1]-1-2, start_y+qr_image.shape[0]-1-2]]
+        keypoints = [(start_x, start_y), (start_x + qr_image.shape[1]-1-2, start_y),
+                     (start_x, start_y+qr_image.shape[0]-1-2), (start_x + qr_image.shape[1]-1-2, start_y+qr_image.shape[0]-1-2)]
         labels = [1]
+        gt_map = np.zeros((image.shape[0], image.shape[1]), dtype=np.int64)
+        #gt_map[2:-2, 2:-2] = 1
         
         if self.augment_data:
-            transform_out = self.geometric_transforms(image=image, bboxes=boxes, class_labels=labels)
+            transform_out = self.geometric_transforms(image=image, bboxes=boxes, keypoints=keypoints, class_labels=labels)
             image = transform_out['image']
             zero_pixels = np.all(image == 0, axis=2)
-            #print(image.shape, zero_pixels.sum())
-            transform_out = self.chromatic_transforms(image=image, bboxes=transform_out['bboxes'], class_labels=transform_out['class_labels'])
+            if self.segment_out:
+                if gt_map.shape != image.shape[:2]:
+                    gt_map = np.ones((image.shape[0], image.shape[1]), dtype=np.int64)
+                    gt_map[zero_pixels] = 0
+            
+            transform_out = self.chromatic_transforms(image=image, bboxes=transform_out['bboxes'],
+                                                      keypoints=transform_out['keypoints'], class_labels=transform_out['class_labels'])
             image = transform_out['image']
             image[zero_pixels] = 0
             boxes = transform_out['bboxes']
+            keypoints = transform_out['keypoints']
+            keypoints = self.__clamp_kpts(keypoints, image.shape[1], image.shape[0])
             labels = transform_out['class_labels']
 
         if self.transform is not None:
             image = self.transfom(image)
 
+        if self.segment_out:
+            return image, gt_map
+        elif self.keypoint_out:
+            return image, (boxes, keypoints, labels)
+
         return image, (boxes, labels)
 
 
-def QRCode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7), num_qr_per_img=1):
+def qrcode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7), num_qr_per_img=1):
     (data_dir, args) = data
 
     train_dataset = test_dataset = None
@@ -136,7 +168,7 @@ def QRCode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240
         for _ in range(num_qr_per_img):
             fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=10000, augment_data=True))
 
-        train_dataset = ImageMixer(data_dir, 'train', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+        train_dataset = ImageMixerWithObjBBox(data_dir, 'train', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
     
     if load_test:
         bg_dataset = BG20K(root_dir=data_dir, d_type='test', transform=None)
@@ -144,85 +176,101 @@ def QRCode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240
         for _ in range(num_qr_per_img):
             fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=2000, augment_data=True))
 
-        test_dataset = ImageMixer(data_dir, 'test', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+        test_dataset = ImageMixerWithObjBBox(data_dir, 'test', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
 
     return train_dataset, test_dataset
 
 
-def QRCode_qVGA_get_datasets(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.05, 0.95))
+def qrcode_get_segmentation_datasets(data, load_train=True, load_test=True, im_size=(352, 352), data_len=10000, fg_to_bg_ratio_range=(0.1, 0.7), num_qr_per_img=1):
+    (data_dir, args) = data
+
+    train_dataset = test_dataset = None
+    data_transform = transforms.Compose([transforms.ToTensor(),
+                                         ai8x.normalize(args=args),
+                                         ai8x.fold(fold_ratio=4)])
+
+    if load_train:
+        bg_dataset = BG20K(root_dir=data_dir, d_type='train', transform=None)
+        fg_dataset = []
+        for _ in range(num_qr_per_img):
+            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=data_len, augment_data=True, segment_out=True))
+
+        train_dataset = ImageMixerWithObjSegment(data_dir, 'train', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+    
+    if load_test:
+        bg_dataset = BG20K(root_dir=data_dir, d_type='test', transform=None)
+        fg_dataset = []
+        for _ in range(num_qr_per_img):
+            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=(data_len // 4), augment_data=True, segment_out=True))
+
+        test_dataset = ImageMixerWithObjSegment(data_dir, 'test', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+
+    return train_dataset, test_dataset
 
 
-def QRCode_qVGA_get_datasets_numqrs2(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.15, 0.45), num_qr_per_img=2)
+def qrcode_get_keypoint_datasets(data, load_train=True, load_test=True, im_size=(320, 240), data_len=10000, fg_to_bg_ratio_range=(0.1, 0.7), num_qr_per_img=1):
+    (data_dir, args) = data
+
+    train_dataset = test_dataset = None
+    data_transform = transforms.Compose([transforms.ToTensor(),
+                                         ai8x.normalize(args=args)])
+
+    if load_train:
+        bg_dataset = BG20K(root_dir=data_dir, d_type='train', transform=None)
+        fg_dataset = []
+        for _ in range(num_qr_per_img):
+            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=data_len, augment_data=True, segment_out=False, keypoint_out=True))
+
+        train_dataset = ImageMixerWithObjBBoxKeyPts(data_dir, 'train', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+        
+    if load_test:
+        bg_dataset = BG20K(root_dir=data_dir, d_type='test', transform=None)
+        fg_dataset = []
+        for _ in range(num_qr_per_img):
+            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', data_len=(data_len // 4), augment_data=True, segment_out=False, keypoint_out=True))
+
+        test_dataset = ImageMixerWithObjBBoxKeyPts(data_dir, 'test', fg_dataset, bg_dataset, transform=data_transform, resize_size=im_size, fg_to_bg_ratio_range=fg_to_bg_ratio_range)
+
+    return train_dataset, test_dataset
 
 
-def QRCode_qVGA_get_datasets_numqrs3(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.15, 0.35), num_qr_per_img=3)
-
-
-def QRCode_qVGA_get_datasets_qrsize_10(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.05, 0.15))
-
-
-def QRCode_qVGA_get_datasets_qrsize_20(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.15, 0.25))
-
-
-def QRCode_qVGA_get_datasets_qrsize_30(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.25, 0.35))
-
-
-def QRCode_qVGA_get_datasets_qrsize_40(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.35, 0.45))
-
-
-def QRCode_qVGA_get_datasets_qrsize_50(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.45, 0.55))
-
-
-def QRCode_qVGA_get_datasets_qrsize_60(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.55, 0.65))
-
-
-def QRCode_qVGA_get_datasets_qrsize_70(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.65, 0.75))
-
-
-def QRCode_qVGA_get_datasets_qrsize_90(data, load_train=True, load_test=True):
-    """Returns QRCode datasets in qVGA (320x240) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(320, 240), fg_to_bg_ratio_range=(0.80, 0.95))
-
-
-def QRCode_qqVGA_get_datasets(data, load_train=True, load_test=True):
+def qrcode_get_datasets(data, load_train=True, load_test=True):
     """Returns QRCode datasets in qqVGA (160x120) resolution"""
-    return QRCode_get_datasets(data, load_train, load_test, im_size=(160, 120), fg_to_bg_ratio_range=(0.05, 0.95))
+    return qrcode_get_datasets(data, load_train, load_test, im_size=(160, 120), fg_to_bg_ratio_range=(0.05, 0.95))
+
+
+def qrcode_get_kpts_datasets(data, load_train=True, load_test=True):
+    """Returns QRCode datasets in qqVGA (160x120) resolution"""
+    return qrcode_get_keypoint_datasets(data, load_train, load_test, im_size=(160, 120), fg_to_bg_ratio_range=(0.05, 0.95))
+
+
+def qrcode_get_kpts_ext_datasets(data, load_train=True, load_test=True):
+    """Returns QRCode datasets in qqVGA (160x120) resolution"""
+    train_set1, test_set1 = qrcode_get_keypoint_datasets(data, load_train, load_test, im_size=(160, 120), data_len=10000, fg_to_bg_ratio_range=(0.05, 0.95))
+    train_set2, test_set2 = qrcode_get_keypoint_datasets(data, load_train, load_test, im_size=(160, 120), data_len=3000, fg_to_bg_ratio_range=(0.75, 0.99))
+    return ConcatDataset([train_set1, train_set2]), ConcatDataset([test_set1, test_set2])
 
 
 datasets = [
     {
-        'name': 'QRCode',
-        'input': (3, 240, 320),
+        'name': 'qrcode_160_120',
+        'input': (3, 120, 160),
         'output': ([1]),
-        'loader': QRCode_qVGA_get_datasets,
+        'loader': qrcode_get_datasets,
         'collate': object_detection_utils.collate_fn
     },
     {
-        'name': 'QRCode_160_120',
+        'name': 'qrcode_160_120_kpts',
         'input': (3, 120, 160),
         'output': ([1]),
-        'loader': QRCode_qqVGA_get_datasets,
+        'loader': qrcode_get_kpts_datasets,
         'collate': object_detection_utils.collate_fn
-    }
+    },
+    {
+        'name': 'qrcode_160_120_kpts_ext',
+        'input': (3, 120, 160),
+        'output': ([1]),
+        'loader': qrcode_get_kpts_ext_datasets,
+        'collate': object_detection_utils.collate_fn
+    },
 ]
-
