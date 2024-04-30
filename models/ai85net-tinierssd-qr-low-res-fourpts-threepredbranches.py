@@ -148,16 +148,16 @@ class PredictionConvolutions(nn.Module):
                                              **kwargs)
         self.loc_conv12_2 = ai8x.FusedConv2dBN(16, n_boxes['conv12_2'] * (4), kernel_size=3,
                                                padding=1, **kwargs)
-        
+
         # Keypoint prediction convolutions
         self.kpts_fire8 = ai8x.FusedConv2dBN(32, n_boxes['fire8'] * (8), kernel_size=3, padding=1,
-                                            **kwargs)
-        self.kpts_fire9 = ai8x.FusedConv2dBN(32, n_boxes['fire9'] * (8), kernel_size=3, padding=1,
-                                            **kwargs)
-        self.kpts_fire10 = ai8x.FusedConv2dBN(32, n_boxes['fire10'] * (8), kernel_size=3, padding=1,
                                              **kwargs)
+        self.kpts_fire9 = ai8x.FusedConv2dBN(32, n_boxes['fire9'] * (8), kernel_size=3, padding=1,
+                                             **kwargs)
+        self.kpts_fire10 = ai8x.FusedConv2dBN(32, n_boxes['fire10'] * (8), kernel_size=3,
+                                              padding=1, **kwargs)
         self.kpts_conv12_2 = ai8x.FusedConv2dBN(16, n_boxes['conv12_2'] * (8), kernel_size=3,
-                                               padding=1, **kwargs)
+                                                padding=1, **kwargs)
 
         # Class prediction convolutions (predict classes in localization boxes)
         self.cl_fire8 = ai8x.FusedConv2dBN(32, n_boxes['fire8'] * n_classes, kernel_size=3,
@@ -218,7 +218,7 @@ class PredictionConvolutions(nn.Module):
         k_conv12_2 = self.kpts_conv12_2(conv12_2_feats)
         k_conv12_2 = k_conv12_2.permute(0, 2, 3, 1).contiguous()
         k_conv12_2 = k_conv12_2.view(batch_size, -1, (8))
-        
+
         c_fire8 = self.cl_fire8(fire8_feats)
         c_fire8 = c_fire8.permute(0, 2, 3, 1).contiguous()
         c_fire8 = c_fire8.view(batch_size, -1,
@@ -243,7 +243,7 @@ class PredictionConvolutions(nn.Module):
         locs = torch.cat([locs, kpts], dim=2)
         classes_scores = torch.cat([c_fire8, c_fire9, c_fire10, c_conv12_2],
                                    dim=1)
-        
+
         return (locs, classes_scores)
 
 
@@ -360,7 +360,8 @@ class TinierSSDQR(nn.Module):
 
         return prior_boxes
 
-    def detect_objects(self, predicted_locs, predicted_scores, min_score, max_overlap, top_k, return_kpts=False):
+    def detect_objects(self, predicted_locs, predicted_scores, min_score,
+                       max_overlap, top_k, return_kpts=False):
         """
         Decipher the locations and class scores to detect objects.
 
@@ -458,7 +459,8 @@ class TinierSSDQR(nn.Module):
             # If no object in any class is found, store a placeholder for 'background'
             if len(image_boxes) == 0:
                 image_boxes.append(torch.FloatTensor([[0., 0., 1., 1.]]).to(self.device))
-                image_kpts.append(torch.FloatTensor([[0., 0., 1., 0., 0., 1., 1., 1.]]).to(self.device))
+                image_kpts.append(torch.FloatTensor([[0., 0., 1., 0., 0., 1., 1., 1.]])\
+                                  .to(self.device))
                 image_labels.append(torch.LongTensor([0]).to(self.device))
                 image_scores.append(torch.FloatTensor([0.]).to(self.device))
 
@@ -484,9 +486,11 @@ class TinierSSDQR(nn.Module):
             all_images_scores.append(image_scores)
 
         if return_kpts:
-            return all_images_boxes, all_images_kpts, all_images_labels, all_images_scores  # lists of length batch_size
+            # lists of length batch_size
+            return all_images_boxes, all_images_kpts, all_images_labels, all_images_scores
 
-        return all_images_boxes, all_images_labels, all_images_scores  # lists of length batch_size
+        # lists of length batch_size
+        return all_images_boxes, all_images_labels, all_images_scores
 
 
 def ai85tinierssdqr_lowres_4kpts_3predbrnches(pretrained=False, **kwargs):

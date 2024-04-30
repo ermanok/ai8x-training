@@ -1,44 +1,65 @@
-from __future__ import print_function
-import numpy as np
-from math import ceil, floor
+###################################################################################################
+#
+# Copyright (C) 2024 Analog Devices, Inc. All Rights Reserved.
+# This software is proprietary to Analog Devices, Inc. and its licensors.
+#
+###################################################################################################
+"""
+Python implementation of MATLAB's image resize function imresize()
 
-# source: https://github.com/fatheral/matlab_imresize
+Taken from https://github.com/fatheral/matlab_imresize
+"""
+
+from __future__ import print_function
+from math import ceil
+import numpy as np
 
 
 def deriveSizeFromScale(img_shape, scale):
+    """Function to calculate output shape from input shape and expected scale"""
     output_shape = []
     for k in range(2):
         output_shape.append(int(ceil(scale[k] * img_shape[k])))
     return output_shape
 
+
 def deriveScaleFromSize(img_shape_in, img_shape_out):
+    """Function to calculate scale from input shape and output shape"""
     scale = []
     for k in range(2):
         scale.append(1.0 * img_shape_out[k] / img_shape_in[k])
     return scale
 
+
 def triangle(x):
+    """Triangle function"""
     x = np.array(x).astype(np.float64)
-    lessthanzero = np.logical_and((x>=-1),x<0)
-    greaterthanzero = np.logical_and((x<=1),x>=0)
-    f = np.multiply((x+1),lessthanzero) + np.multiply((1-x),greaterthanzero)
+    lessthanzero = np.logical_and((x>=-1), x<0)
+    greaterthanzero = np.logical_and((x<=1), x>=0)
+    f = np.multiply((x+1), lessthanzero) + np.multiply((1-x), greaterthanzero)
     return f
 
+
 def cubic(x):
+    """Cubic function"""
     x = np.array(x).astype(np.float64)
     absx = np.absolute(x)
     absx2 = np.multiply(absx, absx)
     absx3 = np.multiply(absx2, absx)
-    f = np.multiply(1.5*absx3 - 2.5*absx2 + 1, absx <= 1) + np.multiply(-0.5*absx3 + 2.5*absx2 - 4*absx + 2, (1 < absx) & (absx <= 2))
+    f = np.multiply(1.5*absx3 - 2.5*absx2 + 1, absx <= 1) + \
+        np.multiply(-0.5*absx3 + 2.5*absx2 - 4*absx + 2, (1 < absx) & (absx <= 2))
     return f
 
+
 def contributions(in_length, out_length, scale, kernel, k_width):
+    """Contributions function"""
     if scale < 1:
         h = lambda x: scale * kernel(scale * x)
         kernel_width = 1.0 * k_width / scale
     else:
         h = kernel
         kernel_width = k_width
+    
     x = np.arange(1, out_length+1).astype(np.float64)
     u = x / scale + 0.5 * (1 - 1 / scale)
     left = np.floor(u - kernel_width / 2)
@@ -47,14 +68,18 @@ def contributions(in_length, out_length, scale, kernel, k_width):
     indices = ind.astype(np.int32)
     weights = h(np.expand_dims(u, axis=1) - indices - 1) # -1 because indexing from 0
     weights = np.divide(weights, np.expand_dims(np.sum(weights, axis=1), axis=1))
-    aux = np.concatenate((np.arange(in_length), np.arange(in_length - 1, -1, step=-1))).astype(np.int32)
+    aux = np.concatenate((np.arange(in_length), np.arange(in_length - 1, -1, step=-1)))
+    aux = aux.astype(np.int32)
     indices = aux[np.mod(indices, aux.size)]
     ind2store = np.nonzero(np.any(weights, axis=0))
     weights = weights[:, ind2store]
     indices = indices[:, ind2store]
+
     return weights, indices
 
+
 def imresizemex(inimg, weights, indices, dim):
+    """imresizemex function"""
     in_shape = inimg.shape
     w_shape = weights.shape
     out_shape = list(in_shape)
@@ -73,14 +98,16 @@ def imresizemex(inimg, weights, indices, dim):
                 w = weights[i_w, :]
                 ind = indices[i_w, :]
                 im_slice = inimg[i_img, ind].astype(np.float64)
-                outimg[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)        
+                outimg[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
     if inimg.dtype == np.uint8:
         outimg = np.clip(outimg, 0, 255)
         return np.around(outimg).astype(np.uint8)
     else:
         return outimg
 
+
 def imresizevec(inimg, weights, indices, dim):
+    """imresizevec function"""
     wshape = weights.shape
     if dim == 0:
         weights = weights.reshape((wshape[0], wshape[2], 1, 1))
@@ -94,21 +121,25 @@ def imresizevec(inimg, weights, indices, dim):
     else:
         return outimg
 
+
 def resizeAlongDim(A, dim, weights, indices, mode="vec"):
+    """Resize image wrt input mode"""
     if mode == "org":
         out = imresizemex(A, weights, indices, dim)
     else:
         out = imresizevec(A, weights, indices, dim)
     return out
 
+
 def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="vec"):
-    if method is 'bicubic':
+    """Function to resize image"""
+    if method == 'bicubic':
         kernel = cubic
-    elif method is 'bilinear':
+    elif method == 'bilinear':
         kernel = triangle
     else:
         print ('Error: Unidentified method supplied')
-        
+
     kernel_width = 4.0
     # Fill scale and output_size
     if scalar_scale is not None:
@@ -141,8 +172,9 @@ def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="ve
         B = np.squeeze(B, axis=2)
     return B
 
+
 def convertDouble2Byte(I):
+    """Fucntion to convert double data to byte"""
     B = np.clip(I, 0.0, 1.0)
     B = 255*B
     return np.around(B).astype(np.uint8)
-

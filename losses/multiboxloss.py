@@ -1,6 +1,6 @@
 ###################################################################################################
 #
-# Copyright (C) 2022 Maxim Integrated Products, Inc. All Rights Reserved.
+# Copyright (C) 2022-2024 Maxim Integrated Products, Inc. All Rights Reserved.
 #
 # Maxim Integrated Products, Inc. Default Copyright Notice:
 # https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
@@ -61,7 +61,7 @@ class MultiBoxLoss(nn.Module):
         """
 
         predicted_locs, predicted_scores = output
-        
+
         has_target_kpts = len(target) == 3
         if has_target_kpts:
             boxes, keypoints, labels = target
@@ -90,7 +90,8 @@ class MultiBoxLoss(nn.Module):
         true_locs = torch.zeros((batch_size, n_priors, 4), dtype=torch.float).to(self.device)
         true_classes = torch.zeros((batch_size, n_priors), dtype=torch.long).to(self.device)
         if has_target_kpts:
-            true_kpts = torch.zeros((batch_size, n_priors, 2*n_kpts), dtype=torch.float).to(self.device)
+            true_kpts = torch.zeros((batch_size, n_priors, 2*n_kpts), dtype=torch.float,
+                                    device=self.device)
 
         for i in range(batch_size):
             n_objects = boxes[i].size(0)
@@ -154,15 +155,12 @@ class MultiBoxLoss(nn.Module):
         # LOCALIZATION LOSS
 
         # Localization loss is computed only over positive (non-background) priors
-        loc_loss = self.smooth_l1(predicted_locs[positive_priors][:, :4], true_locs[positive_priors])
+        loc_loss = self.smooth_l1(predicted_locs[positive_priors][:, :4],
+                                  true_locs[positive_priors])
         loc_loss_kpts = 0.0
         for i in range(n_kpts):
             loc_loss_kpts += self.smooth_l1(predicted_locs[positive_priors][:, (2*i+4):(2*i+6)],
                                             true_kpts[positive_priors][:, (2*i):(2*i+2)])
-        # loc_loss_kpt1 = self.smooth_l1(predicted_locs[positive_priors][:, 4:6], true_kpts[positive_priors][:, :2])
-        # loc_loss_kpt2 = self.smooth_l1(predicted_locs[positive_priors][:, 6:8], true_kpts[positive_priors][:, 2:4])
-        # loc_loss_kpt3 = self.smooth_l1(predicted_locs[positive_priors][:, 8:10], true_kpts[positive_priors][:, 4:6])
-        # loc_loss_kpt4 = self.smooth_l1(predicted_locs[positive_priors][:, 10:], true_kpts[positive_priors][:, 6:])
 
         # Note: indexing with a torch.uint8 (byte) tensor flattens the tensor when indexing is
         # across multiple dimensions (N & number_of_priors)
@@ -207,7 +205,6 @@ class MultiBoxLoss(nn.Module):
             # (), scalar
 
             # TOTAL LOSS
-            #print(f'Conf Loss: {conf_loss}, Loc Loss: {loc_loss}, Kpts Loss: {loc_loss_kpts}')
             return conf_loss + self.alpha * (loc_loss + loc_loss_kpts)
 
         return torch.mean(conf_loss_all)

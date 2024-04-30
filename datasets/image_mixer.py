@@ -1,6 +1,16 @@
-import copy
-import numpy as np
+###################################################################################################
+#
+# Copyright (C) 2024 Analog Devices, Inc. All Rights Reserved.
+# This software is proprietary to Analog Devices, Inc. and its licensors.
+#
+###################################################################################################
+"""
+Main classes and functions to create a new dataset by mixing a foreground and 
+a background image datasets.
+"""
+
 import random
+import numpy as np
 
 import cv2
 
@@ -12,24 +22,33 @@ from utils.WBAugmenter import WBEmulator as wbAugPython
 
 
 class ImageMixerWithObjBBox(Dataset):
-    def __init__(self, root_dir, d_type, fg_datasets, bg_dataset, transform=None, resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
+    """
+    Dataloader to mix two image datasets when the target is bounding box of foreground the objects.
+    """
+    def __init__(self, d_type, fg_datasets, bg_dataset, transform=None,
+                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
         self.d_type = d_type
         self.transform = transform
         self.fg_datasets = fg_datasets
         self.bg_dataset = bg_dataset
         self.fg_to_bg_ratio_range = fg_to_bg_ratio_range
-        self.album_transforms = album.Compose([album.Resize(height=resize_size[1], width=resize_size[0]),
-                                               album.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.25, p=0.75),
+        self.album_transforms = album.Compose([album.Resize(height=resize_size[1],
+                                                            width=resize_size[0]),
+                                               album.ColorJitter(brightness=0.25, contrast=0.25,
+                                                                 saturation=0.25, hue=0.25,
+                                                                 p=0.75),
                                                album.ISONoise(p=0.9),
                                                album.AdvancedBlur(p=0.9)],
-                                               bbox_params=album.BboxParams(format='pascal_voc',  label_fields=['class_labels']))
+                                               bbox_params=album.BboxParams(format='pascal_voc',
+                                                                label_fields=['class_labels']))
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()
 
     def __resize_fg_img(self, image_fg, image_bg, fg_boxes=None):
         # resize fg image to a random size preserving the aspect ratio
         fg_to_bg_ratio = random.uniform(self.fg_to_bg_ratio_range[0], self.fg_to_bg_ratio_range[1])
-        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]), int(fg_to_bg_ratio * image_bg.shape[1]))
+        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]),
+                    int(fg_to_bg_ratio * image_bg.shape[1]))
 
         fx = exp_size[0] / image_fg.shape[0] 
         fy = exp_size[1] / image_fg.shape[1]
@@ -48,9 +67,8 @@ class ImageMixerWithObjBBox(Dataset):
     def __check_if_boxes_intersect(self, start_x, start_y, box, box_list):
         box_p = (box[0]+start_x, box[1]+start_y, box[2]+start_x, box[3]+start_y)
         for box_l in box_list:
-            if (box_l[0] <= box_p[0] <= box_l[2]) or (box_l[0] <= box_p[2] <= box_l[2]):
-                return True
-            elif (box_l[1] <= box_p[1] <= box_l[3]) or (box_l[1] <= box_p[3] <= box_l[3]):
+            if (box_l[0] <= box_p[0] <= box_l[2]) or (box_l[0] <= box_p[2] <= box_l[2]) or\
+               (box_l[1] <= box_p[1] <= box_l[3]) or (box_l[1] <= box_p[3] <= box_l[3]):
                 return True
 
         return False
@@ -75,13 +93,15 @@ class ImageMixerWithObjBBox(Dataset):
             image_fg, (boxes, labels) = fg_dset[idx]
             #resize fg image randomly
             image_fg, boxes = self.__resize_fg_img(image_fg, image_bg, boxes)
+            fg_height = image_fg.shape[0]
+            fg_width = image_fg.shape[1]
 
             retry = True
             num_retry = 0
             while retry:
                 #randomly locate fg on bg
-                start_y = random.randint(0, image_bg.shape[0] - image_fg.shape[0] - 1)
-                start_x = random.randint(0, image_bg.shape[1] - image_fg.shape[1] - 1)
+                start_y = random.randint(0, image_bg.shape[0] - fg_height - 1)
+                start_x = random.randint(0, image_bg.shape[1] - fg_width - 1)
     
                 for box in boxes:
                     retry = False
@@ -94,16 +114,19 @@ class ImageMixerWithObjBBox(Dataset):
                 if not retry and (num_retry < max_num_retries):
                     #Fill zero values foreground pixels with background
                     zero_pixels = np.all(image_fg == 0, axis=2)
-                    image_fg[zero_pixels] = image_bg[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :][zero_pixels]
-                    image[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :] = image_fg
+                    image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height),
+                                                     start_x:(start_x + fg_width), :][zero_pixels]
+                    image[start_y:(start_y + fg_height), start_x:(start_x + fg_width), :] = image_fg
                     for idx, box in enumerate(boxes):
-                        box_list.append((box[0]+start_x, box[1]+start_y, box[2]+start_x, box[3]+start_y))
+                        box_list.append((box[0]+start_x, box[1]+start_y,
+                                         box[2]+start_x, box[3]+start_y))
                         label_list.append(labels[idx])
 
-        transform_out = self.album_transforms(image=image, bboxes=box_list, class_labels=label_list)
+        transform_out = self.album_transforms(image=image, bboxes=box_list,
+                                              class_labels=label_list)
         image = transform_out['image']
         if np.random.random() < self.p_wb_augment:
-            image, wb_pf = self.wbAugmenter.generateWbsRGB(image, 1)
+            image, _ = self.wbAugmenter.generateWbsRGB(image, 1)
             image = np.array(image[0])
         boxes = transform_out['bboxes']
         labels = transform_out['class_labels']
@@ -123,24 +146,33 @@ class ImageMixerWithObjBBox(Dataset):
 
 
 class ImageMixerWithObjSegment(Dataset):
-    def __init__(self, root_dir, d_type, fg_datasets, bg_dataset, transform=None, resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
+    """
+    Dataloader to mix two image datasets when the target is segments of foreground the objects.
+    """
+    def __init__(self, d_type, fg_datasets, bg_dataset, transform=None,
+                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
         self.d_type = d_type
         self.transform = transform
         self.fg_datasets = fg_datasets
         self.bg_dataset = bg_dataset
         self.fg_to_bg_ratio_range = fg_to_bg_ratio_range
-        self.album_transforms = album.Compose([album.Resize(height=resize_size[1], width=resize_size[0]),
-                                               album.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.25, p=0.75),
+        self.album_transforms = album.Compose([album.Resize(height=resize_size[1],
+                                                            width=resize_size[0]),
+                                               album.ColorJitter(brightness=0.25, contrast=0.25,
+                                                                 saturation=0.25, hue=0.25, p=0.75),
                                                album.ISONoise(p=0.9),
                                                album.AdvancedBlur(p=0.9)])
-        self.gt_transforms = album.Compose([album.Resize(height=resize_size[1], width=resize_size[0], interpolation=cv2.INTER_NEAREST)])
+        self.gt_transforms = album.Compose([album.Resize(height=resize_size[1],
+                                                         width=resize_size[0],
+                                                         interpolation=cv2.INTER_NEAREST)])
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()
 
     def __resize_fg_img(self, image_fg, gt_fg, image_bg):
         # resize fg image to a random size preserving the aspect ratio
         fg_to_bg_ratio = random.uniform(self.fg_to_bg_ratio_range[0], self.fg_to_bg_ratio_range[1])
-        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]), int(fg_to_bg_ratio * image_bg.shape[1]))
+        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]), 
+                    int(fg_to_bg_ratio * image_bg.shape[1]))
 
         fx = exp_size[0] / image_fg.shape[0] 
         fy = exp_size[1] / image_fg.shape[1]
@@ -152,7 +184,8 @@ class ImageMixerWithObjSegment(Dataset):
         return image_fg, gt_fg
 
     def __check_if_boxes_intersect(self, start_x, start_y, gt_fg, gt):
-        return ((gt[start_y:(start_y+gt_fg.shape[0]), start_x:(start_x+gt_fg.shape[1])] > 0) & (gt_fg > 0)).any()
+        return ((gt[start_y:(start_y+gt_fg.shape[0]), start_x:(start_x+gt_fg.shape[1])] > 0) &
+                (gt_fg > 0)).any()
 
     def __len__(self):
         return len(self.fg_datasets[0])
@@ -173,13 +206,15 @@ class ImageMixerWithObjSegment(Dataset):
             image_fg, gt_fg = fg_dset[idx]
             #resize fg image randomly
             image_fg, gt_fg = self.__resize_fg_img(image_fg, gt_fg, image_bg)
+            fg_height = image_fg.shape[0]
+            fg_width = image_fg.shape[1]
 
             retry = True
             num_retry = 0
             while retry:
                 #randomly locate fg on bg
-                start_y = random.randint(0, image_bg.shape[0] - image_fg.shape[0] - 1)
-                start_x = random.randint(0, image_bg.shape[1] - image_fg.shape[1] - 1)
+                start_y = random.randint(0, image_bg.shape[0] - fg_height - 1)
+                start_x = random.randint(0, image_bg.shape[1] - fg_width - 1)
     
                 retry = False
                 if self.__check_if_boxes_intersect(start_x, start_y, gt_fg, gt):
@@ -191,14 +226,15 @@ class ImageMixerWithObjSegment(Dataset):
                 if not retry and (num_retry < max_num_retries):
                     #Fill zero values foreground pizels with background
                     zero_pixels = np.all(image_fg == 0, axis=2)
-                    image_fg[zero_pixels] = image_bg[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :][zero_pixels]
-                    image[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :] = image_fg
+                    image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height), 
+                                                     start_x:(start_x + fg_width), :][zero_pixels]
+                    image[start_y:(start_y + fg_height), start_x:(start_x + fg_width), :] = image_fg
                     gt[start_y:(start_y+gt_fg.shape[0]), start_x:(start_x+gt_fg.shape[1])] = gt_fg
 
         transform_out = self.album_transforms(image=image)
         image = transform_out['image']
         if np.random.random() < self.p_wb_augment:
-            image, wb_pf = self.wbAugmenter.generateWbsRGB(image, 1)
+            image, _ = self.wbAugmenter.generateWbsRGB(image, 1)
             image = np.array(image[0])
         
         gt_transform_out = self.gt_transforms(image=gt)
@@ -211,18 +247,26 @@ class ImageMixerWithObjSegment(Dataset):
 
 
 class ImageMixerWithObjBBoxKeyPts(Dataset):
-    #Image Mixer with target bounding boxes and keypoints
-    def __init__(self, root_dir, d_type, fg_datasets, bg_dataset, transform=None, resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
+    """
+    Dataloader to mix two image datasets when the target includes both the bounding box and the
+    keypoints of foreground the objects.
+    """
+    def __init__(self, d_type, fg_datasets, bg_dataset, transform=None,
+                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
         self.d_type = d_type
         self.transform = transform
         self.fg_datasets = fg_datasets
         self.bg_dataset = bg_dataset
         self.fg_to_bg_ratio_range = fg_to_bg_ratio_range
-        self.album_transforms = album.Compose([album.Resize(height=resize_size[1], width=resize_size[0]),
-                                               album.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.25, p=0.75),
+        self.album_transforms = album.Compose([album.Resize(height=resize_size[1],
+                                                            width=resize_size[0]),
+                                               album.ColorJitter(brightness=0.25, contrast=0.25, 
+                                                                 saturation=0.25, hue=0.25,
+                                                                 p=0.75),
                                                album.ISONoise(p=0.9),
                                                album.AdvancedBlur(p=0.9)],
-                                               bbox_params=album.BboxParams(format='pascal_voc',  label_fields=['class_labels']),
+                                               bbox_params=album.BboxParams(format='pascal_voc',
+                                                                    label_fields=['class_labels']),
                                                keypoint_params=album.KeypointParams(format='xy'))
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()
@@ -230,7 +274,8 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
     def __resize_fg_img(self, image_fg, image_bg, fg_boxes=None, fg_keypoints=None):
         # resize fg image to a random size preserving the aspect ratio
         fg_to_bg_ratio = random.uniform(self.fg_to_bg_ratio_range[0], self.fg_to_bg_ratio_range[1])
-        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]), int(fg_to_bg_ratio * image_bg.shape[1]))
+        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]),
+                    int(fg_to_bg_ratio * image_bg.shape[1]))
 
         fx = exp_size[0] / image_fg.shape[0] 
         fy = exp_size[1] / image_fg.shape[1]
@@ -253,9 +298,8 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
     def __check_if_boxes_intersect(self, start_x, start_y, box, box_list):
         box_p = (box[0]+start_x, box[1]+start_y, box[2]+start_x, box[3]+start_y)
         for box_l in box_list:
-            if (box_l[0] <= box_p[0] <= box_l[2]) or (box_l[0] <= box_p[2] <= box_l[2]):
-                return True
-            elif (box_l[1] <= box_p[1] <= box_l[3]) or (box_l[1] <= box_p[3] <= box_l[3]):
+            if (box_l[0] <= box_p[0] <= box_l[2]) or (box_l[0] <= box_p[2] <= box_l[2]) or\
+                (box_l[1] <= box_p[1] <= box_l[3]) or (box_l[1] <= box_p[3] <= box_l[3]):
                 return True
 
         return False
@@ -281,13 +325,15 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
             image_fg, (boxes, keypoints, labels) = fg_dset[idx]
             #resize fg image randomly
             image_fg, boxes, keypoints = self.__resize_fg_img(image_fg, image_bg, boxes, keypoints)
+            fg_height = image_fg.shape[0]
+            fg_width = image_fg.shape[1]
 
             retry = True
             num_retry = 0
             while retry:
                 #randomly locate fg on bg
-                start_y = random.randint(0, image_bg.shape[0] - image_fg.shape[0] - 1)
-                start_x = random.randint(0, image_bg.shape[1] - image_fg.shape[1] - 1)
+                start_y = random.randint(0, image_bg.shape[0] - fg_height - 1)
+                start_x = random.randint(0, image_bg.shape[1] - fg_width - 1)
     
                 for box in boxes:
                     retry = False
@@ -300,18 +346,20 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                 if not retry and (num_retry < max_num_retries):
                     #Fill zero values foreground pixels with background
                     zero_pixels = np.all(image_fg == 0, axis=2)
-                    image_fg[zero_pixels] = image_bg[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :][zero_pixels]
-                    image[start_y:(start_y + image_fg.shape[0]), start_x:(start_x + image_fg.shape[1]), :] = image_fg
+                    image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height),
+                                                     start_x:(start_x + fg_width), :][zero_pixels]
+                    image[start_y:(start_y + fg_height), start_x:(start_x + fg_width), :] = image_fg
                     for idx, box in enumerate(boxes):
                         box_list.append((box[0]+start_x, box[1]+start_y, box[2]+start_x, box[3]+start_y))
                         label_list.append(labels[idx])
                         for kp_idx, keypoint in enumerate(keypoints):
                             keypoint_list.append((keypoint[0]+start_x, keypoint[1]+start_y))
 
-        transform_out = self.album_transforms(image=image, bboxes=box_list, keypoints=keypoint_list, class_labels=label_list)
+        transform_out = self.album_transforms(image=image, bboxes=box_list,
+                                              keypoints=keypoint_list, class_labels=label_list)
         image = transform_out['image']
         if np.random.random() < self.p_wb_augment:
-            image, wb_pf = self.wbAugmenter.generateWbsRGB(image, 1)
+            image, _ = self.wbAugmenter.generateWbsRGB(image, 1)
             image = np.array(image[0])
         boxes = transform_out['bboxes']
         keypoints = transform_out['keypoints']
@@ -327,8 +375,9 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                                                                      float(box[3]/image.shape[1])])
             #Normalize keypoints:
             for kp_idx, keypoint in enumerate(keypoints):
-                keypoints[kp_idx] = self.__clamp_normalized_coords([float(keypoint[0]/image.shape[2]),
-                                                                       float(keypoint[1]/image.shape[1])])
+                keypoints[kp_idx] = self.__clamp_normalized_coords(
+                                            [float(keypoint[0]/image.shape[2]),
+                                             float(keypoint[1]/image.shape[1])])
 
             for kp_idx, keypoint in enumerate(keypoints):
                 keypoints[kp_idx] = [(keypoint[0] - boxes[0][0]) / (boxes[0][2] - boxes[0][0]),

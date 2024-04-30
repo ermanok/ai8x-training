@@ -740,25 +740,6 @@ def train(train_loader, model, criterion, optimizer, epoch,
             for target_idx in range(len(target_temp[0])):
                 temp_list = [elem[target_idx].to(args.device) for elem in target_temp]
                 target = target + (temp_list, )
-            
-            # if len(target[0]) == 3:
-            #     boxes_list = [elem[0].to(args.device) for elem in target]
-            #     kpts_list = [elem[1].to(args.device) for elem in target]
-            #     labels_list = [elem[2].to(args.device) for elem in target]
-            
-            #     # boxes_list = [boxes.to(args.device) for boxes in boxes_list]
-            #     # kpts_list = [keypoints.to(args.device) for keypoints in kpts_list]
-            #     # labels_list = [labels.to(args.device) for labels in labels_list]
-
-            #     target = (boxes_list, kpts_list, labels_list)
-            # else:
-            #     boxes_list = [elem[0].to(args.device) for elem in target]
-            #     labels_list = [elem[1].to(args.device) for elem in target]
-            
-                # boxes_list = [boxes.to(args.device) for boxes in boxes_list]
-                # labels_list = [labels.to(args.device) for labels in labels_list]
-
-            #     target = (boxes_list, labels_list)
 
             inputs = inputs.to(args.device)
         else:
@@ -1068,31 +1049,13 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
 
                 inputs = inputs.to(args.device)
                 filtered_all_images_boxes = None
-                
+
                 target = tuple()
                 for target_idx in range(len(target_temp[0])):
                     temp_list = [elem[target_idx].to(args.device) for elem in target_temp]
                     target = target + (temp_list, )
 
                 labels_list_for_map = [elem[-1].to(args.device) - 1 for elem in target_temp]
-
-                # if len(target[0]) == 2:
-                #     boxes_list = [elem[0].to(args.device) for elem in target]
-                #     labels_list = [elem[1].to(args.device) for elem in target]
-
-                #     # Adjust ground truth index as mAP calculator uses 0-indexed class labels
-                #     labels_list_for_map = [elem[1].to(args.device) - 1 for elem in target]
-
-                #     target = (boxes_list, labels_list)
-                # else:              
-                #     boxes_list = [elem[0].to(args.device) for elem in target]
-                #     kpts_list = [elem[1].to(args.device) for elem in target]
-                #     labels_list = [elem[2].to(args.device) for elem in target]
-
-                #     # Adjust ground truth index as mAP calculator uses 0-indexed class labels
-                #     labels_list_for_map = [elem[2].to(args.device) - 1 for elem in target]
-    
-                #     target = (boxes_list, kpts_list, labels_list)
 
                 # compute output from model
                 output_boxes, output_conf = model(inputs)

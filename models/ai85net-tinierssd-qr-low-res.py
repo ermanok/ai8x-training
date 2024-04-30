@@ -213,7 +213,7 @@ class PredictionConvolutions(nn.Module):
         locs = torch.cat([l_fire8, l_fire9, l_fire10, l_conv12_2], dim=1)
         classes_scores = torch.cat([c_fire8, c_fire9, c_fire10, c_conv12_2],
                                    dim=1)
-        
+
         return (locs, classes_scores)
 
 
