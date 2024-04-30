@@ -10,23 +10,22 @@ Main classes and functions to create a new dataset from randomly generated QR co
 
 import random
 from urllib.request import Request, urlopen
+
 import numpy as np
 
-import cv2
-import qrcode
-import albumentations as album
-from torch.utils.data import Dataset
-from torch.utils.data import ConcatDataset
+from torch.utils.data import ConcatDataset, Dataset
 from torchvision import transforms
 
-from datasets.bg20k import BG20K
-from datasets.image_mixer import ImageMixerWithObjBBox
-from datasets.image_mixer import ImageMixerWithObjSegment
-from datasets.image_mixer import ImageMixerWithObjBBoxKeyPts
+import albumentations as album
+import cv2
+import qrcode
 
 import ai8x
-from utils import object_detection_utils
+from datasets.bg20k import BG20K
+from datasets.image_mixer import (ImageMixerWithObjBBox, ImageMixerWithObjSegment,
+                                  ImageMixerWithObjBBoxKeyPts)
 
+from utils import object_detection_utils
 
 class RandomWordGenerator():
     """
@@ -57,7 +56,7 @@ class QRCodeGenerator(Dataset):
     min_num_words = 1
     max_num_words = 4
 
-    def __init__(self, root_dir, d_type, data_len, transform=None, augment_data=False,
+    def __init__(self, root_dir, d_type, data_len, transform=None, augment_data=False, # pylint: disable=unused-argument
                  segment_out=False, keypoint_out=False):
         self.data_len = data_len
         self.transform = transform
@@ -70,34 +69,34 @@ class QRCodeGenerator(Dataset):
         self.__gen_random_words()
 
         # define geometric transforms
-        self.g_transforms = album.Compose([album.Affine(scale = (0.6, 1.),
-                                                        translate_percent=(0.2, 0.4),
-                                                        rotate=(-45, 45),
-                                                        #shear=(-45, 45),
-                                                        mode=cv2.BORDER_CONSTANT,
-                                                        fit_output=True,
-                                                        p=0.9),
-                                           album.Perspective(scale=(0.05, 0.2), p=0.5),],
-                                          bbox_params=album.BboxParams(format='pascal_voc',
-                                                                label_fields=['class_labels']),
-                                          keypoint_params=album.KeypointParams(format='xy',
+        self.g_transforms = \
+            album.Compose([album.Affine(scale=(0.6, 1.),
+                                        translate_percent=(0.2, 0.4),
+                                        rotate=(-45, 45),
+                                        mode=cv2.BORDER_CONSTANT,
+                                        fit_output=True,
+                                        p=0.9),
+                            album.Perspective(scale=(0.05, 0.2), p=0.5)],
+                           bbox_params=album.BboxParams(format='pascal_voc',
+                                                        label_fields=['class_labels']),
+                           keypoint_params=album.KeypointParams(format='xy',
                                                                 remove_invisible=False))
         # define chromatic transforms
-        self.c_transforms = album.Compose([album.RGBShift(r_shift_limit=64, g_shift_limit=64,
-                                                          b_shift_limit=64, p=0.9),
-                                           album.ColorJitter(brightness=0.5, contrast=0.5,
-                                                             saturation=0.5, hue=0.5, p=0.9),
-                                           album.MultiplicativeNoise(multiplier=(0.5, 1.5),
-                                                                     per_channel=True,
-                                                                     elementwise=True, p=0.7),
-                                           album.MotionBlur(p=0.7),],
-                                          bbox_params=album.BboxParams(format='pascal_voc',
-                                                                label_fields=['class_labels']),
-                                          keypoint_params=album.KeypointParams(format='xy',
-                                                                remove_invisible=False))
+        self.c_transforms = \
+            album.Compose([album.RGBShift(r_shift_limit=64, g_shift_limit=64,
+                                          b_shift_limit=64, p=0.9),
+                           album.ColorJitter(brightness=0.5, contrast=0.5,
+                                             saturation=0.5, hue=0.5, p=0.9),
+                           album.MultiplicativeNoise(multiplier=(0.5, 1.5), per_channel=True,
+                                                     elementwise=True, p=0.7),
+                           album.MotionBlur(p=0.7)],
+                          bbox_params=album.BboxParams(format='pascal_voc',
+                                                       label_fields=['class_labels']),
+                          keypoint_params=album.KeypointParams(format='xy',
+                                                               remove_invisible=False))
 
     def __gen_random_words(self):
-        random_word_gen = RandomWordGenerator()#RandomWords()
+        random_word_gen = RandomWordGenerator()
 
         for _ in range(self.data_len):
             num_words = random.randint(self.min_num_words, self.max_num_words)
@@ -125,7 +124,7 @@ class QRCodeGenerator(Dataset):
         clamp_kpts = keypoints
 
         for idx1, kpt in enumerate(keypoints):
-            clamp_kpts[idx1] = (min(max(0, kpt[0]), img_width-1), 
+            clamp_kpts[idx1] = (min(max(0, kpt[0]), img_width-1),
                                 min(max(0, kpt[1]), img_height-1))
 
         return clamp_kpts
@@ -136,7 +135,7 @@ class QRCodeGenerator(Dataset):
     def __getitem__(self, index):
         text = self.random_text_list[index]
         qr_image = self.__gen_qr(text)
-        qr_image = 245 * np.asarray(qr_image).astype(np.uint8) + 10 # convert to numpy
+        qr_image = 245 * np.asarray(qr_image).astype(np.uint8) + 10
 
         image = qr_image
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
@@ -145,7 +144,7 @@ class QRCodeGenerator(Dataset):
                   start_y,
                   start_x + qr_image.shape[1]-1-2,
                   start_y+qr_image.shape[0]-1-2]]
-        keypoints = [(start_x, start_y), 
+        keypoints = [(start_x, start_y),
                      (start_x + qr_image.shape[1]-1-2, start_y),
                      (start_x, start_y+qr_image.shape[0]-1-2),
                      (start_x + qr_image.shape[1]-1-2, start_y+qr_image.shape[0]-1-2)]

@@ -15,15 +15,16 @@
 Main class and required functions to augment images with different white balance settings.
 """
 
-from datetime import datetime
 import os
-from os.path import splitext, split, basename, join, exists
 import pickle
 import random as rnd
 import shutil
+from datetime import datetime
+from os.path import splitext, split, basename, join, exists
 
 import numpy as np
-import numpy.matlib # pylint: disable=unused-import
+import numpy.matlib  # pylint: disable=unused-import
+
 from PIL import Image
 
 from utils.WBAugmenter import imresize as resize
@@ -48,8 +49,8 @@ class WBEmulator:
         self.sigma = 0.25  # fall off factor for KNN
         # WB & photo finishing styles
         self.wb_photo_finishing = ['_F_AS', '_F_CS', '_S_AS', '_S_CS',
-                                  '_T_AS', '_T_CS', '_C_AS', '_C_CS',
-                                  '_D_AS', '_D_CS']
+                                   '_T_AS', '_T_CS', '_C_AS', '_C_CS',
+                                   '_D_AS', '_D_CS']
 
     def encode(self, hist):
         """Generates a compacted feature of a given RGB-uv histogram tensor."""
@@ -62,18 +63,18 @@ class WBEmulator:
         hist_reshaped = np.append(histR_reshaped,
                                   [histG_reshaped, histB_reshaped])
         feature = np.dot(hist_reshaped - self.encoderBias.transpose(),
-                        self.encoderWeights)
+                         self.encoderWeights)
         return feature
 
-    def rgbuv_hist(self, I):
+    def rgbuv_hist(self, img):
         """Computes an RGB-uv histogram tensor."""
-        sz = np.shape(I)  # get size of current image
+        sz = np.shape(img)  # get size of current image
         if sz[0] * sz[1] > 202500:  # resize if it is larger than 450*450
             factor = np.sqrt(202500 / (sz[0] * sz[1]))  # rescale factor
             newH = int(np.floor(sz[0] * factor))
             newW = int(np.floor(sz[1] * factor))
-            I = resize.imresize(I, output_shape=(newW, newH))
-        I_reshaped = I[(I > 0).all(axis=2)]
+            img = resize.imresize(img, output_shape=(newW, newH))
+        I_reshaped = img[(img > 0).all(axis=2)]
         eps = 6.4 / self.h
         A = np.arange(-3.2, 3.19, eps)  # dummy vector
         hist = np.zeros((A.size, A.size, 3))  # histogram will be stored here
@@ -92,11 +93,11 @@ class WBEmulator:
             hist[:, :, i] = np.sqrt(hist[:, :, i] / norm_)  # (hist/norm)^(1/2)
         return hist
 
-    def generateWbsRGB(self, I, outNum=10):
-        """Generates outNum new images of a given image I."""
+    def generateWbsRGB(self, img, outNum=10):
+        """Generates outNum new images of a given image."""
         assert outNum <= 10
-        I = to_numpy(I)  # convert to double
-        feature = self.encode(self.rgbuv_hist(I))
+        img = to_numpy(img)  # convert to double
+        feature = self.encode(self.rgbuv_hist(img))
         if outNum < len(self.wb_photo_finishing):
             wb_pf = rnd.sample(self.wb_photo_finishing, outNum)
             inds = []
@@ -117,18 +118,17 @@ class WBEmulator:
         weightsH = weightsH / sum(weightsH)  # normalize blending weights
         for _, ind in enumerate(inds):  # for each of the retried training examples,
             # generate a mapping function
-            mf = sum(np.reshape(np.matlib.repmat(weightsH, 1, 27),
-                                (self.K, 1, 9, 3)) *
-                    self.mappingFuncs[(idH - 1) * 10 + ind, :])
+            mf = sum(np.reshape(np.matlib.repmat(weightsH, 1, 27), (self.K, 1, 9, 3)) *
+                     self.mappingFuncs[(idH - 1) * 10 + ind, :])
             mf = mf.reshape(9, 3, order="F")  # reshape it to be 9 * 3
-            synthWBimages.append(changeWB(I, mf))  # apply it!
+            synthWBimages.append(changeWB(img, mf))  # apply it!
         return synthWBimages, wb_pf
 
-    def computeMappingFunc(self, I, outNum=10):
-        """Generates outNum mapping functions of a given image I."""
+    def computeMappingFunc(self, img, outNum=10):
+        """Generates outNum mapping functions of a given image."""
         assert outNum <= 10
-        I = to_numpy(I)  # convert to double
-        feature = self.encode(self.rgbuv_hist(I))
+        img = to_numpy(img)  # convert to double
+        feature = self.encode(self.rgbuv_hist(img))
         if outNum < len(self.wb_photo_finishing):
             wb_pf = rnd.sample(self.wb_photo_finishing, outNum)
             inds = []
@@ -149,10 +149,9 @@ class WBEmulator:
         weightsH = weightsH / sum(weightsH)  # normalize blending weights
         for _, ind in enumerate(inds):  # for each of the retried training examples,
             # generate a mapping function
-            mf = sum(np.reshape(np.matlib.repmat(weightsH, 1, 27),
-                                (self.K, 1, 9, 3)) *
-                    self.mappingFuncs[(idH - 1) * 10 + ind, :])
-            mfs.append(mf.reshape(9, 3, order="F")) # reshape it to be 9 * 3
+            mf = sum(np.reshape(np.matlib.repmat(weightsH, 1, 27), (self.K, 1, 9, 3)) *
+                     self.mappingFuncs[(idH - 1) * 10 + ind, :])
+            mfs.append(mf.reshape(9, 3, order="F"))  # reshape it to be 9 * 3
 
         return mfs
 
@@ -163,8 +162,8 @@ class WBEmulator:
             now = datetime.now()
             target_dir = now.strftime('%m-%d-%Y_%H-%M-%S')
         for file in filenames:
-            I = to_numpy(Image.open(file))
-            mfs = self.computeMappingFunc(I, outNum=outNum)
+            img = to_numpy(Image.open(file))
+            mfs = self.computeMappingFunc(img, outNum=outNum)
             out_filename = basename(splitext(file)[0])
             main_dir = split(file)[0]
             if exists(join(main_dir, target_dir)) == 0:
@@ -183,33 +182,33 @@ class WBEmulator:
 
     def open_with_wb_aug(self, filename, target_dir, target_size=None):
         """Open saved image with white balance augmenter"""
-        I = Image.open(filename)
+        img = Image.open(filename)
         if target_size is not None:
-            I = I.resize((target_size, target_size))
-        I = to_numpy(I)
+           img =img.resize((target_size, target_size))
+        img = to_numpy(img)
         out_filename = basename(splitext(filename)[0])
         main_dir = split(filename)[0]
         with open(join(main_dir, target_dir, out_filename + '_mfs.pickle'), 'rb') as handle:
             mfs = pickle.load(handle)
             ind = np.random.randint(len(mfs))
             mf = mfs[ind]
-            I = changeWB(I, mf)
-            return I
+            img = changeWB(img, mf)
+            return img
 
     def single_image_processing(self, in_img, out_dir="../results", outNum=10, write_original=1):
         """Applies the WB emulator to a single image in_img."""
         assert outNum <= 10
         print("processing image: " + in_img + "\n")
         filename, file_extension = os.path.splitext(in_img)  # get file parts
-        I = Image.open(in_img)  # read the image
+        img = Image.open(in_img)  # read the image
         # generate new images with different WB settings
-        outImgs, wb_pf = self.generateWbsRGB(I, outNum)
+        outImgs, wb_pf = self.generateWbsRGB(img, outNum)
         for i in range(outNum):  # save images
             outImg = outImgs[i]  # get the ith output image
             # save it
             outImg.save(out_dir + '/' + os.path.basename(filename) + wb_pf[i] + file_extension)
             if write_original == 1:
-                I.save(out_dir + '/' + os.path.basename(filename) + '_original' + file_extension)
+                img.save(out_dir + '/' + os.path.basename(filename) + '_original' + file_extension)
 
     def batch_processing(self, in_dir, out_dir="../results", outNum=10, write_original=1):
         """Applies the WB emulator to all images in a given directory in_dir."""
@@ -222,14 +221,14 @@ class WBEmulator:
         for in_img in imgfiles:
             print("processing image: " + in_img + "\n")
             filename, file_extension = os.path.splitext(in_img)
-            I = Image.open(in_img)
-            outImgs, wb_pf = self.generateWbsRGB(I, outNum)
+            img = Image.open(in_img)
+            outImgs, wb_pf = self.generateWbsRGB(img, outNum)
             for i in range(outNum):  # save images
                 outImg = outImgs[i]  # get the ith output image
                 outImg.save(out_dir + '/' + os.path.basename(filename) +
                             wb_pf[i] + file_extension)  # save it
                 if write_original == 1:
-                    I.save(out_dir + '/' + os.path.basename(filename) + '_original' +
+                    img.save(out_dir + '/' + os.path.basename(filename) + '_original' +
                            file_extension)
 
     def trainingGT_processing(self, in_dir, out_dir, gt_dir, out_gt_dir, gt_ext,
@@ -256,19 +255,19 @@ class WBEmulator:
             filename, file_extension = os.path.splitext(in_img)
             gtbasename, gt_extension = os.path.splitext(gtfile)
             gtbasename = os.path.basename(gtbasename)
-            I = Image.open(in_img)
+            img = Image.open(in_img)
             # generate new images with different WB settings
-            outImgs, wb_pf = self.generateWbsRGB(I, outNum)
+            outImgs, wb_pf = self.generateWbsRGB(img, outNum)
             for i in range(outNum):
                 outImg = outImgs[i]
                 outImg.save(out_dir + '/' + os.path.basename(filename) + wb_pf[i] +
                             file_extension)  # save it
-                shutil.copyfile(gtfile,  # copy corresponding gt file
-                                os.path.join(out_gt_dir, gtbasename + wb_pf[i] +
-                                            gt_extension))
+                # copy corresponding gt file
+                shutil.copyfile(gtfile,
+                                os.path.join(out_gt_dir, gtbasename + wb_pf[i] + gt_extension))
 
                 if write_original == 1:  # if write_original flag is true
-                    I.save(out_dir + '/' + os.path.basename(filename) + '_original' +
+                    img.save(out_dir + '/' + os.path.basename(filename) + '_original' +
                            file_extension)
                     # copy corresponding gt file
                     shutil.copyfile(gtfile, os.path.join(
@@ -289,18 +288,18 @@ def changeWB(inp, m):
     return out
 
 
-def kernelP9(I):
+def kernelP9(img):
     """Kernel function: kernel(r, g, b) -> (r, g, b, r2, g2, b2, rg, rb, gb)"""
-    return (np.transpose((I[:, 0], I[:, 1], I[:, 2], I[:, 0] * I[:, 0],
-                          I[:, 1] * I[:, 1], I[:, 2] * I[:, 2], I[:, 0] * I[:, 1],
-                          I[:, 0] * I[:, 2], I[:, 1] * I[:, 2])))
+    return (np.transpose((img[:, 0], img[:, 1], img[:, 2], img[:, 0] * img[:, 0],
+                          img[:, 1] * img[:, 1], img[:, 2] * img[:, 2], img[:, 0] * img[:, 1],
+                          img[:, 0] * img[:, 2], img[:, 1] * img[:, 2])))
 
 
-def outOfGamutClipping(I):
+def outOfGamutClipping(img):
     """Clips out-of-gamut pixels."""
-    I[I > 1] = 1  # any pixel is higher than 1, clip it to 1
-    I[I < 0] = 0  # any pixel is below 0, clip it to 0
-    return I
+    img[img > 1] = 1  # any pixel is higher than 1, clip it to 1
+    img[img < 0] = 0  # any pixel is below 0, clip it to 0
+    return img
 
 
 def to_numpy(im):

@@ -414,13 +414,13 @@ class TinierSSDQR(nn.Module):
                     continue
                 class_scores = class_scores[score_above_min_score]
                 class_decoded_locs = decoded_locs[score_above_min_score]  # (n_qualified, 4)
-                class_box_kpts = box_kpts[score_above_min_score] # (n_qualified, 8)
+                class_box_kpts = box_kpts[score_above_min_score]  # (n_qualified, 8)
 
                 # Sort predicted boxes and scores by scores
                 class_scores, sort_ind = class_scores.sort(dim=0, descending=True)
                 # (n_qualified), (n_min_score)
                 class_decoded_locs = class_decoded_locs[sort_ind]  # (n_min_score, 4)
-                class_box_kpts = class_box_kpts[sort_ind] # (n_min_score, 8)
+                class_box_kpts = class_box_kpts[sort_ind]  # (n_min_score, 8)
 
                 # Find the overlap between predicted boxes
                 overlap = obj_detect_utils.find_jaccard_overlap(class_decoded_locs,
@@ -459,7 +459,7 @@ class TinierSSDQR(nn.Module):
             # If no object in any class is found, store a placeholder for 'background'
             if len(image_boxes) == 0:
                 image_boxes.append(torch.FloatTensor([[0., 0., 1., 1.]]).to(self.device))
-                image_kpts.append(torch.FloatTensor([[0., 0., 1., 0., 0., 1., 1., 1.]])\
+                image_kpts.append(torch.FloatTensor([[0., 0., 1., 0., 0., 1., 1., 1.]])
                                   .to(self.device))
                 image_labels.append(torch.LongTensor([0]).to(self.device))
                 image_scores.append(torch.FloatTensor([0.]).to(self.device))

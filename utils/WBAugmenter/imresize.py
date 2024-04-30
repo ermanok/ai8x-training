@@ -11,8 +11,10 @@ Taken from https://github.com/fatheral/matlab_imresize
 """
 
 from __future__ import print_function
-from math import ceil
+
 import sys
+from math import ceil
+
 import numpy as np
 
 
@@ -35,8 +37,8 @@ def deriveScaleFromSize(img_shape_in, img_shape_out):
 def triangle(x):
     """Triangle function"""
     x = np.array(x).astype(np.float64)
-    lessthanzero = np.logical_and((x>=-1), x<0)
-    greaterthanzero = np.logical_and((x<=1), x>=0)
+    lessthanzero = np.logical_and((x >= -1), x < 0)
+    greaterthanzero = np.logical_and((x <= 1), x >= 0)
     f = np.multiply((x+1), lessthanzero) + np.multiply((1-x), greaterthanzero)
     return f
 
@@ -55,7 +57,8 @@ def cubic(x):
 def contributions(in_length, out_length, scale, kernel, k_width):
     """Contributions function"""
     if scale < 1:
-        h = lambda x: scale * kernel(scale * x)
+        def h(x):
+            return scale * kernel(scale * x)
         kernel_width = 1.0 * k_width / scale
     else:
         h = kernel
@@ -65,9 +68,9 @@ def contributions(in_length, out_length, scale, kernel, k_width):
     u = x / scale + 0.5 * (1 - 1 / scale)
     left = np.floor(u - kernel_width / 2)
     P = int(ceil(kernel_width)) + 2
-    ind = np.expand_dims(left, axis=1) + np.arange(P) - 1 # -1 because indexing from 0
+    ind = np.expand_dims(left, axis=1) + np.arange(P) - 1  # -1 because indexing from 0
     indices = ind.astype(np.int32)
-    weights = h(np.expand_dims(u, axis=1) - indices - 1) # -1 because indexing from 0
+    weights = h(np.expand_dims(u, axis=1) - indices - 1)  # -1 because indexing from 0
     weights = np.divide(weights, np.expand_dims(np.sum(weights, axis=1), axis=1))
     aux = np.concatenate((np.arange(in_length), np.arange(in_length - 1, -1, step=-1)))
     aux = aux.astype(np.int32)
@@ -112,10 +115,10 @@ def imresizevec(inimg, weights, indices, dim):
     wshape = weights.shape
     if dim == 0:
         weights = weights.reshape((wshape[0], wshape[2], 1, 1))
-        outimg =  np.sum(weights*((inimg[indices].squeeze(axis=1)).astype(np.float64)), axis=1)
+        outimg = np.sum(weights*((inimg[indices].squeeze(axis=1)).astype(np.float64)), axis=1)
     elif dim == 1:
         weights = weights.reshape((1, wshape[0], wshape[2], 1))
-        outimg =  np.sum(weights*((inimg[:, indices].squeeze(axis=2)).astype(np.float64)), axis=2)
+        outimg = np.sum(weights*((inimg[:, indices].squeeze(axis=2)).astype(np.float64)), axis=2)
     if inimg.dtype == np.uint8:
         outimg = np.clip(outimg, 0, 255)
         return np.around(outimg).astype(np.uint8)
@@ -132,28 +135,28 @@ def resizeAlongDim(A, dim, weights, indices, mode="vec"):
     return out
 
 
-def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="vec"):
+def imresize(img, scalar_scale=None, method='bicubic', output_shape=None, mode="vec"):
     """Function to resize image"""
     if method == 'bicubic':
         kernel = cubic
     elif method == 'bilinear':
         kernel = triangle
     else:
-        print ('Error: Unidentified method supplied')
+        print('Error: Unidentified method supplied')
 
     kernel_width = 4.0
     # Fill scale and output_size
     if scalar_scale is not None:
         scalar_scale = float(scalar_scale)
         scale = [scalar_scale, scalar_scale]
-        output_size = deriveSizeFromScale(I.shape, scale)
+        output_size = deriveSizeFromScale(img.shape, scale)
     elif output_shape is not None:
-        scale = deriveScaleFromSize(I.shape, output_shape)
+        scale = deriveScaleFromSize(img.shape, output_shape)
         output_size = list(output_shape)
     else:
-        print ('Error: scalar_scale OR output_shape should be defined!')
+        print('Error: scalar_scale OR output_shape should be defined!')
         sys.exit()
-    
+
     scale_np = np.array(scale)
     order = np.argsort(scale_np)
     weights = []
@@ -175,8 +178,8 @@ def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="ve
     return B
 
 
-def convertDouble2Byte(I):
+def convertDouble2Byte(img):
     """Fucntion to convert double data to byte"""
-    B = np.clip(I, 0.0, 1.0)
-    B = 255*B
-    return np.around(B).astype(np.uint8)
+    img_out = np.clip(img, 0.0, 1.0)
+    img_out = 255*img_out
+    return np.around(img_out).astype(np.uint8)

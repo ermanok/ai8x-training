@@ -50,7 +50,7 @@ class ImageMixerWithObjBBox(Dataset):
         exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]),
                     int(fg_to_bg_ratio * image_bg.shape[1]))
 
-        fx = exp_size[0] / image_fg.shape[0] 
+        fx = exp_size[0] / image_fg.shape[0]
         fy = exp_size[1] / image_fg.shape[1]
         f = min(fx, fy)
 
@@ -89,7 +89,7 @@ class ImageMixerWithObjBBox(Dataset):
                 idx = index
             else:
                 idx = random.randint(0, len(fg_dset)-1)
-            
+
             image_fg, (boxes, labels) = fg_dset[idx]
             # resize fg image randomly
             image_fg, boxes = self.__resize_fg_img(image_fg, image_bg, boxes)
@@ -151,7 +151,7 @@ class ImageMixerWithObjSegment(Dataset):
     Dataloader to mix two image datasets when the target is segments of foreground the objects.
     """
     def __init__(self, d_type, fg_datasets, bg_dataset, transform=None,
-                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
+                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)):
         self.d_type = d_type
         self.transform = transform
         self.fg_datasets = fg_datasets
@@ -173,16 +173,16 @@ class ImageMixerWithObjSegment(Dataset):
     def __resize_fg_img(self, image_fg, gt_fg, image_bg):
         # resize fg image to a random size preserving the aspect ratio
         fg_to_bg_ratio = random.uniform(self.fg_to_bg_ratio_range[0], self.fg_to_bg_ratio_range[1])
-        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]), 
+        exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]),
                     int(fg_to_bg_ratio * image_bg.shape[1]))
 
-        fx = exp_size[0] / image_fg.shape[0] 
+        fx = exp_size[0] / image_fg.shape[0]
         fy = exp_size[1] / image_fg.shape[1]
         f = min(fx, fy)
 
         image_fg = cv2.resize(image_fg, (0, 0), fx=f, fy=f)
         gt_fg = cv2.resize(gt_fg, (0, 0), fx=f, fy=f, interpolation=cv2.INTER_NEAREST)
-        
+
         return image_fg, gt_fg
 
     def __check_if_boxes_intersect(self, start_x, start_y, gt_fg, gt):
@@ -204,7 +204,7 @@ class ImageMixerWithObjSegment(Dataset):
                 idx = index
             else:
                 idx = random.randint(0, len(fg_dset)-1)
-            
+
             image_fg, gt_fg = fg_dset[idx]
             # resize fg image randomly
             image_fg, gt_fg = self.__resize_fg_img(image_fg, gt_fg, image_bg)
@@ -228,7 +228,7 @@ class ImageMixerWithObjSegment(Dataset):
                 if not retry and (num_retry < max_num_retries):
                     # Fill zero values foreground pizels with background
                     zero_pixels = np.all(image_fg == 0, axis=2)
-                    image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height), 
+                    image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height),
                                                      start_x:(start_x + fg_width), :][zero_pixels]
                     image[start_y:(start_y + fg_height),
                           start_x:(start_x + fg_width), :] = image_fg
@@ -242,7 +242,7 @@ class ImageMixerWithObjSegment(Dataset):
 
         gt_transform_out = self.gt_transforms(image=gt)
         gt = gt_transform_out['image']
-        
+
         if self.transform is not None:
             image = self.transform(image)
 
@@ -255,7 +255,7 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
     keypoints of foreground the objects.
     """
     def __init__(self, d_type, fg_datasets, bg_dataset, transform=None,
-                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)): 
+                 resize_size=(320, 240), fg_to_bg_ratio_range=(0.1, 0.7)):
         self.d_type = d_type
         self.transform = transform
         self.fg_datasets = fg_datasets
@@ -280,7 +280,7 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
         exp_size = (int(fg_to_bg_ratio * image_bg.shape[0]),
                     int(fg_to_bg_ratio * image_bg.shape[1]))
 
-        fx = exp_size[0] / image_fg.shape[0] 
+        fx = exp_size[0] / image_fg.shape[0]
         fy = exp_size[1] / image_fg.shape[1]
         f = min(fx, fy)
 
@@ -324,7 +324,7 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                 idx = index
             else:
                 idx = random.randint(0, len(fg_dset)-1)
-            
+
             image_fg, (boxes, keypoints, labels) = fg_dset[idx]
             # resize fg image randomly
             image_fg, boxes, keypoints = self.__resize_fg_img(image_fg, image_bg, boxes, keypoints)
@@ -337,7 +337,7 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                 # randomly locate fg on bg
                 start_y = random.randint(0, image_bg.shape[0] - fg_height - 1)
                 start_x = random.randint(0, image_bg.shape[1] - fg_width - 1)
-    
+
                 for box in boxes:
                     retry = False
                     if self.__check_if_boxes_intersect(start_x, start_y, box, box_list):
@@ -351,7 +351,8 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                     zero_pixels = np.all(image_fg == 0, axis=2)
                     image_fg[zero_pixels] = image_bg[start_y:(start_y + fg_height),
                                                      start_x:(start_x + fg_width), :][zero_pixels]
-                    image[start_y:(start_y + fg_height), start_x:(start_x + fg_width), :] = image_fg
+                    image[start_y:(start_y + fg_height),
+                          start_x:(start_x + fg_width), :] = image_fg
                     for idx, box in enumerate(boxes):
                         box_list.append((box[0]+start_x, box[1]+start_y,
                                          box[2]+start_x, box[3]+start_y))
