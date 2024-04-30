@@ -12,6 +12,7 @@ Taken from https://github.com/fatheral/matlab_imresize
 
 from __future__ import print_function
 from math import ceil
+import sys
 import numpy as np
 
 
@@ -59,7 +60,7 @@ def contributions(in_length, out_length, scale, kernel, k_width):
     else:
         h = kernel
         kernel_width = k_width
-    
+
     x = np.arange(1, out_length+1).astype(np.float64)
     u = x / scale + 0.5 * (1 - 1 / scale)
     left = np.floor(u - kernel_width / 2)
@@ -102,8 +103,8 @@ def imresizemex(inimg, weights, indices, dim):
     if inimg.dtype == np.uint8:
         outimg = np.clip(outimg, 0, 255)
         return np.around(outimg).astype(np.uint8)
-    else:
-        return outimg
+
+    return outimg
 
 
 def imresizevec(inimg, weights, indices, dim):
@@ -118,8 +119,8 @@ def imresizevec(inimg, weights, indices, dim):
     if inimg.dtype == np.uint8:
         outimg = np.clip(outimg, 0, 255)
         return np.around(outimg).astype(np.uint8)
-    else:
-        return outimg
+
+    return outimg
 
 
 def resizeAlongDim(A, dim, weights, indices, mode="vec"):
@@ -151,7 +152,8 @@ def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="ve
         output_size = list(output_shape)
     else:
         print ('Error: scalar_scale OR output_shape should be defined!')
-        return
+        sys.exit()
+    
     scale_np = np.array(scale)
     order = np.argsort(scale_np)
     weights = []
@@ -160,7 +162,7 @@ def imresize(I, scalar_scale=None, method='bicubic', output_shape=None, mode="ve
         w, ind = contributions(I.shape[k], output_size[k], scale[k], kernel, kernel_width)
         weights.append(w)
         indices.append(ind)
-    B = np.copy(I) 
+    B = np.copy(I)
     flag2D = False
     if B.ndim == 2:
         B = np.expand_dims(B, axis=2)

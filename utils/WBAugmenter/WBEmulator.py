@@ -23,7 +23,7 @@ import random as rnd
 import shutil
 
 import numpy as np
-import numpy.matlib
+import numpy.matlib # pylint: disable=unused-import
 from PIL import Image
 
 from utils.WBAugmenter import imresize as resize
@@ -82,7 +82,7 @@ class WBEmulator:
             r = []  # excluded channels will be stored here
             for j in range(3):  # for each color channel do
                 if j != i:  # if current channel does not match current layer,
-                  r.append(j)  # exclude it
+                    r.append(j)  # exclude it
             Iu = np.log(I_reshaped[:, i] / I_reshaped[:, r[1]])
             Iv = np.log(I_reshaped[:, i] / I_reshaped[:, r[0]])
             hist[:, :, i], _, _ = np.histogram2d(Iu, Iv, bins=self.h,
@@ -153,7 +153,7 @@ class WBEmulator:
                                 (self.K, 1, 9, 3)) *
                     self.mappingFuncs[(idH - 1) * 10 + ind, :])
             mfs.append(mf.reshape(9, 3, order="F")) # reshape it to be 9 * 3
-        
+
         return mfs
 
     def precompute_mfs(self, filenames, outNum=10, target_dir=None):
@@ -177,11 +177,12 @@ class WBEmulator:
     def delete_precomputed_mfs(self, filenames, target_dir):
         """Delete stored mapping functions for a set of files."""
         for file in filenames:
-          out_filename = basename(splitext(file)[0])
-          main_dir = split(file)[0]
-          os.remove(join(main_dir, target_dir, out_filename + '_mfs.pickle'))
+            out_filename = basename(splitext(file)[0])
+            main_dir = split(file)[0]
+            os.remove(join(main_dir, target_dir, out_filename + '_mfs.pickle'))
 
     def open_with_wb_aug(self, filename, target_dir, target_size=None):
+        """Open saved image with white balance augmenter"""
         I = Image.open(filename)
         if target_size is not None:
             I = I.resize((target_size, target_size))
@@ -196,19 +197,19 @@ class WBEmulator:
             return I
 
     def single_image_processing(self, in_img, out_dir="../results", outNum=10, write_original=1):
-      """Applies the WB emulator to a single image in_img."""
-      assert outNum <= 10
-      print("processing image: " + in_img + "\n")
-      filename, file_extension = os.path.splitext(in_img)  # get file parts
-      I = Image.open(in_img)  # read the image
-      # generate new images with different WB settings
-      outImgs, wb_pf = self.generateWbsRGB(I, outNum)
-      for i in range(outNum):  # save images
-          outImg = outImgs[i]  # get the ith output image
-          # save it
-          outImg.save(out_dir + '/' + os.path.basename(filename) + wb_pf[i] + file_extension)
-          if write_original == 1:
-              I.save(out_dir + '/' + os.path.basename(filename) + '_original' + file_extension)
+        """Applies the WB emulator to a single image in_img."""
+        assert outNum <= 10
+        print("processing image: " + in_img + "\n")
+        filename, file_extension = os.path.splitext(in_img)  # get file parts
+        I = Image.open(in_img)  # read the image
+        # generate new images with different WB settings
+        outImgs, wb_pf = self.generateWbsRGB(I, outNum)
+        for i in range(outNum):  # save images
+            outImg = outImgs[i]  # get the ith output image
+            # save it
+            outImg.save(out_dir + '/' + os.path.basename(filename) + wb_pf[i] + file_extension)
+            if write_original == 1:
+                I.save(out_dir + '/' + os.path.basename(filename) + '_original' + file_extension)
 
     def batch_processing(self, in_dir, out_dir="../results", outNum=10, write_original=1):
         """Applies the WB emulator to all images in a given directory in_dir."""
@@ -274,16 +275,16 @@ class WBEmulator:
                       out_gt_dir, gtbasename + '_original' + gt_extension))
 
 
-def changeWB(input, m):
+def changeWB(inp, m):
     """Applies a mapping function m to a given input image."""
-    sz = np.shape(input)  # get size of input image
-    I_reshaped = np.reshape(input, (int(input.size / 3), 3), order="F")
+    sz = np.shape(inp)  # get size of input image
+    I_reshaped = np.reshape(inp, (int(inp.size / 3), 3), order="F")
     kernel_out = kernelP9(I_reshaped)  # raise input image to a higher-dim space
     # apply m to the input image after raising it the selected higher degree
     out = np.dot(kernel_out, m)
     out = outOfGamutClipping(out)  # clip out-of-gamut pixels
     # reshape output image back to the original image shape
-    out = out.reshape(sz[0], sz[1], sz[2], order="F")
+    out = out.reshape((sz[0], sz[1], sz[2]), order="F")
     out = to_image(out)
     return out
 

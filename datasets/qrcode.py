@@ -8,9 +8,9 @@
 Main classes and functions to create a new dataset from randomly generated QR codes.
 """
 
-import numpy as np
 import random
 from urllib.request import Request, urlopen
+import numpy as np
 
 import cv2
 import qrcode
@@ -29,6 +29,9 @@ from utils import object_detection_utils
 
 
 class RandomWordGenerator():
+    """
+    Class to generate random English words
+    """
     def __init__(self):
         url = "https://svnweb.freebsd.org/csrg/share/dict/words?view=co&content-type=text/plain"
         req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -37,11 +40,18 @@ class RandomWordGenerator():
         self.words = long_txt.splitlines()
 
     def get_random_word(self):
+        """
+        Returns random word
+        """
         idx = random.randint(0, len(self.words)-1)
         return self.words[idx]
 
 
 class QRCodeGenerator(Dataset):
+    """
+    Class to populate a dataset that includes random QR codes with different geometric
+    and chromatic transformations.
+    """
     min_qr_size = 2
     max_qr_size = 10
     min_num_words = 1
@@ -59,7 +69,7 @@ class QRCodeGenerator(Dataset):
 
         self.__gen_random_words()
 
-        # define geom 
+        # define geometric transforms
         self.g_transforms = album.Compose([album.Affine(scale = (0.6, 1.),
                                                         translate_percent=(0.2, 0.4),
                                                         rotate=(-45, 45),
@@ -72,6 +82,7 @@ class QRCodeGenerator(Dataset):
                                                                 label_fields=['class_labels']),
                                           keypoint_params=album.KeypointParams(format='xy',
                                                                 remove_invisible=False))
+        # define chromatic transforms
         self.c_transforms = album.Compose([album.RGBShift(r_shift_limit=64, g_shift_limit=64,
                                                           b_shift_limit=64, p=0.9),
                                            album.ColorJitter(brightness=0.5, contrast=0.5,
@@ -82,7 +93,7 @@ class QRCodeGenerator(Dataset):
                                            album.MotionBlur(p=0.7),],
                                           bbox_params=album.BboxParams(format='pascal_voc',
                                                                 label_fields=['class_labels']),
-                                          keypoint_params=album.KeypointParams(format='xy', 
+                                          keypoint_params=album.KeypointParams(format='xy',
                                                                 remove_invisible=False))
 
     def __gen_random_words(self):
@@ -167,7 +178,7 @@ class QRCodeGenerator(Dataset):
 
         if self.segment_out:
             return image, gt_map
-        elif self.keypoint_out:
+        if self.keypoint_out:
             return image, (boxes, keypoints, labels)
 
         return image, (boxes, labels)
@@ -175,6 +186,9 @@ class QRCodeGenerator(Dataset):
 
 def qrcode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240),
                         fg_to_bg_ratio_range=(0.1, 0.7), num_qr_per_img=1):
+    """
+    Returns QR Dataset with qr codes' bounding boxes as ground truths
+    """
     (data_dir, args) = data
 
     train_dataset = test_dataset = None
@@ -185,7 +199,7 @@ def qrcode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240
         bg_dataset = BG20K(root_dir=data_dir, d_type='train', transform=None)
         fg_dataset = []
         for _ in range(num_qr_per_img):
-            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train', 
+            fg_dataset.append(QRCodeGenerator(root_dir=data_dir, d_type='train',
                                               data_len=10000, augment_data=True))
 
         train_dataset = ImageMixerWithObjBBox('train', fg_dataset, bg_dataset,
@@ -209,6 +223,9 @@ def qrcode_get_datasets(data, load_train=True, load_test=True, im_size=(320, 240
 def qrcode_get_segmentation_datasets(data, load_train=True, load_test=True, im_size=(352, 352),
                                      data_len=10000, fg_to_bg_ratio_range=(0.1, 0.7),
                                      num_qr_per_img=1):
+    """
+    Returns QR Dataset with QR codes' segments as ground truths
+    """
     (data_dir, args) = data
 
     train_dataset = test_dataset = None
@@ -225,7 +242,7 @@ def qrcode_get_segmentation_datasets(data, load_train=True, load_test=True, im_s
                                               segment_out=True))
 
         train_dataset = ImageMixerWithObjSegment('train', fg_dataset, bg_dataset,
-                                                 transform=data_transform, resize_size=im_size, 
+                                                 transform=data_transform, resize_size=im_size,
                                                  fg_to_bg_ratio_range=fg_to_bg_ratio_range)
 
     if load_test:
@@ -246,6 +263,9 @@ def qrcode_get_segmentation_datasets(data, load_train=True, load_test=True, im_s
 def qrcode_get_keypoint_datasets(data, load_train=True, load_test=True, im_size=(320, 240),
                                  data_len=10000, fg_to_bg_ratio_range=(0.1, 0.7),
                                  num_qr_per_img=1):
+    """
+    Returns QR Dataset with qr codes' bounding boxes and keypoints as ground truths
+    """
     (data_dir, args) = data
 
     train_dataset = test_dataset = None
@@ -280,19 +300,19 @@ def qrcode_get_keypoint_datasets(data, load_train=True, load_test=True, im_size=
     return train_dataset, test_dataset
 
 
-def qrcode_get_datasets(data, load_train=True, load_test=True):
+def qrcode_get_datasets_qqvga(data, load_train=True, load_test=True):
     """Returns QRCode datasets in qqVGA (160x120) resolution"""
     return qrcode_get_datasets(data, load_train, load_test, im_size=(160, 120),
                                fg_to_bg_ratio_range=(0.05, 0.95))
 
 
-def qrcode_get_kpts_datasets(data, load_train=True, load_test=True):
+def qrcode_get_kpts_datasets_qqvga(data, load_train=True, load_test=True):
     """Returns QRCode datasets in qqVGA (160x120) resolution"""
     return qrcode_get_keypoint_datasets(data, load_train, load_test, im_size=(160, 120),
                                         fg_to_bg_ratio_range=(0.05, 0.95))
 
 
-def qrcode_get_kpts_ext_datasets(data, load_train=True, load_test=True):
+def qrcode_get_kpts_ext_datasets_qqvga(data, load_train=True, load_test=True):
     """Returns QRCode datasets in qqVGA (160x120) resolution"""
     train_set1, test_set1 = qrcode_get_keypoint_datasets(data, load_train, load_test,
                                                          im_size=(160, 120), data_len=10000,
@@ -308,21 +328,21 @@ datasets = [
         'name': 'qrcode_160_120',
         'input': (3, 120, 160),
         'output': ([1]),
-        'loader': qrcode_get_datasets,
+        'loader': qrcode_get_datasets_qqvga,
         'collate': object_detection_utils.collate_fn
     },
     {
         'name': 'qrcode_160_120_kpts',
         'input': (3, 120, 160),
         'output': ([1]),
-        'loader': qrcode_get_kpts_datasets,
+        'loader': qrcode_get_kpts_datasets_qqvga,
         'collate': object_detection_utils.collate_fn
     },
     {
         'name': 'qrcode_160_120_kpts_ext',
         'input': (3, 120, 160),
         'output': ([1]),
-        'loader': qrcode_get_kpts_ext_datasets,
+        'loader': qrcode_get_kpts_ext_datasets_qqvga,
         'collate': object_detection_utils.collate_fn
     },
 ]
