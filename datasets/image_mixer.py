@@ -261,17 +261,15 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
         self.fg_datasets = fg_datasets
         self.bg_dataset = bg_dataset
         self.fg_to_bg_ratio_range = fg_to_bg_ratio_range
-        self.album_transforms = album.Compose([album.Resize(height=resize_size[1],
-                                                            width=resize_size[0]),
-                                               album.ColorJitter(brightness=0.25, contrast=0.25,
-                                                                 saturation=0.25, hue=0.25,
-                                                                 p=0.75),
-                                               album.ISONoise(p=0.9),
-                                               album.AdvancedBlur(p=0.9)],
-                                              bbox_params=album.BboxParams(format='pascal_voc',
-                                                                           label_fields=
-                                                                            ['class_labels']),
-                                              keypoint_params=album.KeypointParams(format='xy'))
+        self.album_transforms = album.Compose(
+                                    [album.Resize(height=resize_size[1], width=resize_size[0]),
+                                     album.ColorJitter(brightness=0.25, contrast=0.25,
+                                                       saturation=0.25, hue=0.25, p=0.75),
+                                     album.ISONoise(p=0.9),
+                                     album.AdvancedBlur(p=0.9)],
+                                    bbox_params=album.BboxParams(format='pascal_voc',
+                                                                 label_fields=['class_labels']),
+                                    keypoint_params=album.KeypointParams(format='xy'))
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()
 
