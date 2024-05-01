@@ -20,7 +20,7 @@ import pickle
 import random as rnd
 import shutil
 from datetime import datetime
-from os.path import splitext, split, basename, join, exists
+from os.path import basename, exists, join, split, splitext
 
 import numpy as np
 import numpy.matlib  # pylint: disable=unused-import
@@ -108,8 +108,8 @@ class WBEmulator:
             inds = list(range(0, len(wb_pf)))
         synthWBimages = []
 
-        D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] + \
-               np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
+        D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] +\
+             np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
 
         # get smallest K distances
         idH = D_sq.argpartition(self.K, axis=0)[:self.K]
@@ -139,8 +139,8 @@ class WBEmulator:
             inds = list(range(0, len(wb_pf)))
         mfs = []
 
-        D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] + \
-               np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
+        D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] +\
+             np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
 
         # get smallest K distances
         idH = D_sq.argpartition(self.K, axis=0)[:self.K]
@@ -184,7 +184,7 @@ class WBEmulator:
         """Open saved image with white balance augmenter"""
         img = Image.open(filename)
         if target_size is not None:
-           img =img.resize((target_size, target_size))
+            img = img.resize((target_size, target_size))
         img = to_numpy(img)
         out_filename = basename(splitext(filename)[0])
         main_dir = split(filename)[0]
@@ -229,7 +229,7 @@ class WBEmulator:
                             wb_pf[i] + file_extension)  # save it
                 if write_original == 1:
                     img.save(out_dir + '/' + os.path.basename(filename) + '_original' +
-                           file_extension)
+                             file_extension)
 
     def trainingGT_processing(self, in_dir, out_dir, gt_dir, out_gt_dir, gt_ext,
                               outNum=10, write_original=1):
@@ -268,7 +268,7 @@ class WBEmulator:
 
                 if write_original == 1:  # if write_original flag is true
                     img.save(out_dir + '/' + os.path.basename(filename) + '_original' +
-                           file_extension)
+                             file_extension)
                     # copy corresponding gt file
                     shutil.copyfile(gtfile, os.path.join(
                       out_gt_dir, gtbasename + '_original' + gt_extension))

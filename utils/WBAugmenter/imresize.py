@@ -162,10 +162,10 @@ def imresize(img, scalar_scale=None, method='bicubic', output_shape=None, mode="
     weights = []
     indices = []
     for k in range(2):
-        w, ind = contributions(I.shape[k], output_size[k], scale[k], kernel, kernel_width)
+        w, ind = contributions(img.shape[k], output_size[k], scale[k], kernel, kernel_width)
         weights.append(w)
         indices.append(ind)
-    B = np.copy(I)
+    B = np.copy(img)
     flag2D = False
     if B.ndim == 2:
         B = np.expand_dims(B, axis=2)

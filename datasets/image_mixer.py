@@ -10,13 +10,13 @@ a background image datasets.
 """
 
 import random
+
 import numpy as np
-
-import cv2
-
-import albumentations as album
 import torch
 from torch.utils.data import Dataset
+
+import albumentations as album
+import cv2
 
 from utils.WBAugmenter import WBEmulator as wbAugPython
 
@@ -268,8 +268,9 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                                                                  p=0.75),
                                                album.ISONoise(p=0.9),
                                                album.AdvancedBlur(p=0.9)],
-                                              bbox_params=album.BboxParams(format='pascal_voc',
-                                                                           label_fields=['class_labels']), # pylint: disable=line-too-long
+                                              bbox_params=
+                                                album.BboxParams(format='pascal_voc',
+                                                                 label_fields=['class_labels']), 
                                               keypoint_params=album.KeypointParams(format='xy'))
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()

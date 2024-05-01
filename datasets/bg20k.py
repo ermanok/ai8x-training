@@ -10,9 +10,10 @@ Main classes and functions for background image dataset BG-20k
 
 import os
 import sys
-import cv2
 
 from torch.utils.data import Dataset
+
+import cv2
 
 
 class BG20K(Dataset):

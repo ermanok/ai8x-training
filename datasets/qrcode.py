@@ -27,6 +27,7 @@ from datasets.image_mixer import (ImageMixerWithObjBBox, ImageMixerWithObjSegmen
 
 from utils import object_detection_utils
 
+
 class RandomWordGenerator():
     """
     Class to generate random English words
@@ -56,8 +57,8 @@ class QRCodeGenerator(Dataset):
     min_num_words = 1
     max_num_words = 4
 
-    def __init__(self, root_dir, d_type, data_len, transform=None, augment_data=False, # pylint: disable=unused-argument
-                 segment_out=False, keypoint_out=False):
+    def __init__(self, root_dir, d_type, data_len, # pylint: disable=unused-argument
+                 transform=None, augment_data=False, segment_out=False, keypoint_out=False):
         self.data_len = data_len
         self.transform = transform
 
