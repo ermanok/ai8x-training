@@ -268,9 +268,8 @@ class ImageMixerWithObjBBoxKeyPts(Dataset):
                                                                  p=0.75),
                                                album.ISONoise(p=0.9),
                                                album.AdvancedBlur(p=0.9)],
-                                              bbox_params=
-                                               album.BboxParams(format='pascal_voc',
-                                                                label_fields=['class_labels']),
+                                              bbox_params=album.BboxParams(format='pascal_voc',
+                                                    label_fields=['class_labels']),
                                               keypoint_params=album.KeypointParams(format='xy'))
         self.p_wb_augment = 0.75
         self.wbAugmenter = wbAugPython.WBEmulator()
