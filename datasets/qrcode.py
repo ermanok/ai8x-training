@@ -12,7 +12,6 @@ import random
 from urllib.request import Request, urlopen
 
 import numpy as np
-
 from torch.utils.data import ConcatDataset, Dataset
 from torchvision import transforms
 
@@ -22,9 +21,8 @@ import qrcode
 
 import ai8x
 from datasets.bg20k import BG20K
-from datasets.image_mixer import (ImageMixerWithObjBBox, ImageMixerWithObjSegment,
-                                  ImageMixerWithObjBBoxKeyPts)
-
+from datasets.image_mixer import (ImageMixerWithObjBBox, ImageMixerWithObjBBoxKeyPts,
+                                  ImageMixerWithObjSegment)
 from utils import object_detection_utils
 
 
@@ -57,7 +55,7 @@ class QRCodeGenerator(Dataset):
     min_num_words = 1
     max_num_words = 4
 
-    def __init__(self, root_dir, d_type, data_len, # pylint: disable=unused-argument
+    def __init__(self, root_dir, d_type, data_len,  # pylint: disable=unused-argument
                  transform=None, augment_data=False, segment_out=False, keypoint_out=False):
         self.data_len = data_len
         self.transform = transform
@@ -77,11 +75,11 @@ class QRCodeGenerator(Dataset):
                                         mode=cv2.BORDER_CONSTANT,
                                         fit_output=True,
                                         p=0.9),
-                            album.Perspective(scale=(0.05, 0.2), p=0.5)],
-                           bbox_params=album.BboxParams(format='pascal_voc',
-                                                        label_fields=['class_labels']),
-                           keypoint_params=album.KeypointParams(format='xy',
-                                                                remove_invisible=False))
+                           album.Perspective(scale=(0.05, 0.2), p=0.5)],
+                          bbox_params=album.BboxParams(format='pascal_voc',
+                                                       label_fields=['class_labels']),
+                          keypoint_params=album.KeypointParams(format='xy',
+                                                               remove_invisible=False))
         # define chromatic transforms
         self.c_transforms = \
             album.Compose([album.RGBShift(r_shift_limit=64, g_shift_limit=64,

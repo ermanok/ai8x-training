@@ -109,7 +109,7 @@ class WBEmulator:
         synthWBimages = []
 
         D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] +\
-             np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
+            np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
 
         # get smallest K distances
         idH = D_sq.argpartition(self.K, axis=0)[:self.K]
@@ -140,7 +140,7 @@ class WBEmulator:
         mfs = []
 
         D_sq = np.einsum('ij, ij ->i', self.features, self.features)[:, None] +\
-             np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
+            np.einsum('ij, ij ->i', feature, feature) - 2 * self.features.dot(feature.T)
 
         # get smallest K distances
         idH = D_sq.argpartition(self.K, axis=0)[:self.K]
