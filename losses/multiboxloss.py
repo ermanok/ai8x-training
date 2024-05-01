@@ -1,18 +1,32 @@
-###################################################################################################
 #
-# Copyright (C) 2022-2024 Maxim Integrated Products, Inc. All Rights Reserved.
-#
-# Maxim Integrated Products, Inc. Default Copyright Notice:
-# https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
-#
-###################################################################################################
-# Multi Box Loss code is from GitHub repo:
-# https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection:
 # MIT License
+#
 # Copyright (c) 2019 Sagar Vinodababu
-# Codes slightly with few minor modifications
+# Portions Copyright (C) 2022-2024 Maxim Integrated Products, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# Multi Box Loss code source:
+# https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection
+#
 """
-    Multi-box Loss for Object Detection Models
+Multi-box Loss for Object Detection Models
 """
 import torch
 from torch import nn
@@ -116,7 +130,7 @@ class MultiBoxLoss(nn.Module):
                 # Then, assign each object to the corresponding maximum-overlap-prior.
                 # (This fixes 1.)
                 object_for_each_prior[prior_for_each_object] = \
-                    torch.LongTensor(range(n_objects)).to(self.device)
+                    torch.tensor(range(n_objects), dtype=torch.long, device=self.device)
 
                 # To ensure these priors qualify, artificially give them an overlap of greater
                 # than 0.5. (This fixes 2.)
@@ -191,8 +205,9 @@ class MultiBoxLoss(nn.Module):
             # (never in top n_hard_negatives)
             conf_loss_neg, _ = conf_loss_neg.sort(dim=1, descending=True)  # (N, number_of_priors),
             # sorted by decreasing hardness
-            hardness_ranks = torch.LongTensor(
-                range(n_priors)).unsqueeze(0).expand_as(conf_loss_neg).to(self.device)
+            hardness_ranks = torch.tensor(
+                range(n_priors), dtype=torch.long,
+                device=self.device).unsqueeze(0).expand_as(conf_loss_neg)
             # (N, number_of_priors)
             hard_negatives = hardness_ranks < n_hard_negatives.unsqueeze(1)
             # (N, number_of_priors)

@@ -1,6 +1,6 @@
 ###################################################################################################
 #
-# Copyright (C) 2022 Maxim Integrated Products, Inc. All Rights Reserved.
+# Copyright (C) 2022-2023 Maxim Integrated Products, Inc. All Rights Reserved.
 #
 # Maxim Integrated Products, Inc. Default Copyright Notice:
 # https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
@@ -304,7 +304,7 @@ class SVHN(Dataset):
             index = 0
 
         if torch.is_tensor(index):
-            index = index.tolist()
+            index = index.tolist()  # type: ignore
 
         img = self.img_list[index]
         boxes = self.boxes_list[index]
@@ -371,7 +371,8 @@ class SVHN(Dataset):
 
         info_df = pd.DataFrame()
 
-        for j in range(f['/digitStruct/bbox'].shape[0]):
+        bbox = '/digitStruct/bbox'
+        for j in range(f[bbox].shape[0]):  # type: ignore # pylint: disable=no-member
             img_name = SVHN.get_name(j, f)
             row_dict = SVHN.get_bbox(j, f)
 
@@ -411,7 +412,7 @@ class SVHN(Dataset):
     @staticmethod
     def fold_image(img, fold_ratio):
         """Folds high resolution H-W-3 image h-w-c such that H * W * 3 = h * w * c.
-           These correspond to c/3 downsampled images of the original high resoluiton image."""
+           These correspond to c/3 downsampled images of the original high resolution image."""
         if fold_ratio == 1:
             img_folded = img
         else:

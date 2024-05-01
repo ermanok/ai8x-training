@@ -1,13 +1,6 @@
-###################################################################################################
 #
-# Copyright (C) 2021-2022 Maxim Integrated Products, Inc. All Rights Reserved.
-#
-# Maxim Integrated Products, Inc. Default Copyright Notice:
-# https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
-#
-###################################################################################################
-#
-# Portions Copyright (c) 2018 Intel Corporation
+# Copyright (c) 2018 Intel Corporation
+# Portions Copyright (C) 2019-2023 Maxim Integrated Products, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -251,6 +244,7 @@ class MixedKWS:
         train_speech, test_speech = KWS_35_get_unquantized_datasets((self.root, args))
         train_noise, test_noise = MSnoise_get_unquantized_datasets((self.root, args))
 
+        assert train_speech and test_speech and train_noise and test_noise
         train_speech.data = train_speech.data.numpy()
         test_speech.data = test_speech.data.numpy()
         train_noise.data = train_noise.data.numpy()

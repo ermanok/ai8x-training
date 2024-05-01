@@ -3,9 +3,9 @@ name: Lint code
 
 on:
   push:
-    branches-ignore: [master]
+    branches-ignore: [main, master]
   pull_request:
-    branches-ignore: [master]
+    branches-ignore: [main, master]
 
 jobs:
   build:
@@ -14,13 +14,25 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: true
 
+      - name: Check source code files for Unicode and CRLF
+        run: |
+          set -e
+          find . -name 'distiller' -prune -o -type f -size +0c -regex '.*\.\(py\|yaml\|yml\|txt\|h\|c\|sh\)' -print0 | xargs -0 file | grep -P '^(?!.*ASCII)|CRLF' || exit 0
+          exit 1
+
+      - name: Check shell scripts for x-bit
+        run: |
+          set -e
+          find . -name 'distiller' -prune -o -type f -name \*.sh \! -perm -1 -print0 | xargs -0 grep . || exit 0
+          exit 1
+
       - name: Lint code
-        uses: github/super-linter@v4
+        uses: super-linter/super-linter/slim@v5
         env:
           VALIDATE_ALL_CODEBASE: true
           DEFAULT_BRANCH: develop

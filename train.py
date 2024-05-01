@@ -1,16 +1,7 @@
 #!/usr/bin/env python3
-###################################################################################################
 #
-# Copyright (C) 2019-2023 Maxim Integrated Products, Inc. All Rights Reserved.
-#
-# Maxim Integrated Products, Inc. Default Copyright Notice:
-# https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
-#
-###################################################################################################
-# pyright: reportMissingModuleSource=false, reportGeneralTypeIssues=false
-# pyright: reportOptionalSubscript=false
-#
-# Portions Copyright (c) 2018 Intel Corporation
+# Copyright (c) 2018 Intel Corporation
+# Portions Copyright (C) 2019-2024 Maxim Integrated Products, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,8 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
-"""This is an example application for compressing image classification models.
+# pyright: reportMissingModuleSource=false, reportGeneralTypeIssues=false
+# pyright: reportOptionalSubscript=false
+"""This is the example training application for MAX7800x.
 
 The application borrows its main flow code from torchvision's ImageNet classification
 training sample application (https://github.com/pytorch/examples/tree/master/imagenet).
@@ -60,6 +52,13 @@ import fnmatch
 import logging
 import operator
 import os
+
+# pylint: disable=wrong-import-position
+if os.name == 'posix':
+    import resource  # pylint: disable=import-error
+# pylint: enable=wrong-import-position
+
+import shutil
 import sys
 import time
 import traceback
@@ -70,7 +69,6 @@ from pydoc import locate
 import numpy as np
 
 import matplotlib
-from pkg_resources import parse_version
 
 # TensorFlow 2.x compatibility
 try:
@@ -81,7 +79,6 @@ except (ModuleNotFoundError, AttributeError):
     pass
 
 import torch
-import torch.nn.parallel
 import torch.optim
 import torch.utils.data
 from torch import nn
@@ -98,6 +95,11 @@ from distiller.data_loggers.collector import (QuantCalibrationStatsCollector,
                                               RecordsActivationStatsCollector,
                                               SummaryActivationStatsCollector, collectors_context)
 from distiller.quantization.range_linear import PostTrainLinearQuantizer
+from pytorch_metric_learning import losses as pml_losses
+from pytorch_metric_learning import testers
+from pytorch_metric_learning.distances import CosineSimilarity
+from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
+from pytorch_metric_learning.utils.inference import CustomKNN
 from torchmetrics.detection.map import MAP as MeanAveragePrecision
 
 # pylint: enable=no-name-in-module
@@ -108,9 +110,10 @@ import nnplot
 import parse_qat_yaml
 import parsecmd
 import sample
+from losses.dummyloss import DummyLoss
 from losses.multiboxloss import MultiBoxLoss
 from nas import parse_nas_yaml
-from utils import object_detection_utils, parse_obj_detection_yaml
+from utils import kd_relationbased, object_detection_utils, parse_obj_detection_yaml
 
 # from range_linear_ai84 import PostTrainLinearQuantizerAI84
 
@@ -137,6 +140,13 @@ def main():
     supported_sources = []
     model_names = []
     dataset_names = []
+
+    if os.name == 'posix':
+        # Check file descriptor limits
+        nfiles = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+        if nfiles < 4096:
+            print(f'WARNING: The open file limit is {nfiles}. '
+                  'Please raise the limit (see documentation).')
 
     # Dynamically load models
     for _, _, files in sorted(os.walk('models')):
@@ -328,6 +338,7 @@ def main():
 
     # We can optionally resume from a checkpoint
     optimizer = None
+    loss_optimizer = None
     if args.resumed_checkpoint_path:
         update_old_model_params(args.resumed_checkpoint_path, model)
         if qat_policy is not None:
@@ -336,6 +347,10 @@ def main():
             # pylint: disable=unsubscriptable-object
             if checkpoint.get('epoch', None) >= qat_policy['start_epoch']:
                 ai8x.fuse_bn_layers(model)
+                if args.name:
+                    args.name = f'{args.name}_qat'
+                else:
+                    args.name = 'qat'
             # pylint: enable=unsubscriptable-object
         model, compression_scheduler, optimizer, start_epoch = apputils.load_checkpoint(
             model, args.resumed_checkpoint_path, model_device=args.device)
@@ -348,13 +363,17 @@ def main():
             # pylint: disable=unsubscriptable-object
             if checkpoint.get('epoch', None) >= qat_policy['start_epoch']:
                 ai8x.fuse_bn_layers(model)
+                if args.name:
+                    args.name = f'{args.name}_qat'
+                else:
+                    args.name = 'qat'
             # pylint: enable=unsubscriptable-object
         model = apputils.load_lean_checkpoint(model, args.load_model_path,
                                               model_device=args.device)
         ai8x.update_model(model)
 
     if not args.load_serialized and args.gpus != -1 and torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model, device_ids=args.gpus).to(args.device)
+        model = nn.DataParallel(model, device_ids=args.gpus).to(args.device)
 
     if args.reset_optimizer:
         start_epoch = 0
@@ -374,6 +393,28 @@ def main():
                                  alpha=obj_detection_params['multi_box_loss']['alpha'],
                                  neg_pos_ratio=obj_detection_params['multi_box_loss']
                                  ['neg_pos_ratio'], device=args.device).to(args.device)
+
+    elif args.dr:
+
+        criterion = pml_losses.SubCenterArcFaceLoss(num_classes=args.num_classes,
+                                                    embedding_size=args.dr,
+                                                    margin=args.scaf_margin,
+                                                    scale=args.scaf_scale)
+        if args.resumed_checkpoint_path:
+            checkpoint = torch.load(args.resumed_checkpoint_path,
+                                    map_location=lambda storage, loc: storage)
+            criterion.W = checkpoint['extras']['loss_weights']
+        criterion = criterion.to(args.device)
+
+        loss_optimizer = torch.optim.Adam(criterion.parameters(), lr=args.scaf_lr)
+        if args.resumed_checkpoint_path:
+            loss_optimizer.load_state_dict(checkpoint['extras']['loss_optimizer_state_dict'])
+
+        distance_fn = CosineSimilarity()
+        custom_knn = CustomKNN(distance_fn, batch_size=args.batch_size)
+        accuracy_calculator = AccuracyCalculator(knn_func=custom_knn,
+                                                 include=("precision_at_1",), k=1)
+
     else:
         if not args.regression:
             if 'weight' in selected_source:
@@ -384,6 +425,11 @@ def main():
                 criterion = nn.CrossEntropyLoss().to(args.device)
         else:
             criterion = nn.MSELoss().to(args.device)
+
+    # Override criterion with dummy loss when student weight is 0
+    if args.kd_student_wt == 0:
+        criterion = DummyLoss(device=args.device).to(args.device)
+        msglogger.info("WARNING: kd_student_wt == 0, Overwriting criterion with a dummy loss")
 
     if optimizer is None:
         optimizer = create_optimizer(model, args)
@@ -403,20 +449,14 @@ def main():
         args.workers, args.validation_split, args.deterministic,
         args.effective_train_size, args.effective_valid_size, args.effective_test_size,
         test_only=args.evaluate, collate_fn=args.collate_fn, cpu=args.device == 'cpu')
-    assert train_loader is not None and val_loader is not None
+    assert args.evaluate or train_loader is not None and val_loader is not None, \
+        "No training and/or validation data in train mode"
+    assert not args.evaluate or test_loader is not None, "No test data in eval mode"
 
     if args.sensitivity is not None:
         sensitivities = np.arange(args.sensitivity_range[0], args.sensitivity_range[1],
                                   args.sensitivity_range[2])
         return sensitivity_analysis(model, criterion, test_loader, pylogger, args, sensitivities)
-
-    if args.evaluate:
-        msglogger.info('Dataset sizes:\n\ttest=%d', len(test_loader.sampler))
-        return evaluate_model(model, criterion, test_loader, pylogger, activations_collectors,
-                              args, compression_scheduler)
-
-    msglogger.info('Dataset sizes:\n\ttraining=%d\n\tvalidation=%d\n\ttest=%d',
-                   len(train_loader.sampler), len(val_loader.sampler), len(test_loader.sampler))
 
     if args.compress:
         # The main use-case for this sample application is CNN compression. Compression
@@ -424,7 +464,8 @@ def main():
         compression_scheduler = distiller.file_config(model, optimizer, args.compress,
                                                       compression_scheduler,
                                                       (start_epoch-1)
-                                                      if args.resumed_checkpoint_path else None)
+                                                      if args.resumed_checkpoint_path
+                                                      else None, loss_optimizer)
     elif compression_scheduler is None:
         compression_scheduler = distiller.CompressionScheduler(model)
 
@@ -448,12 +489,17 @@ def main():
 
     args.kd_policy = None
     if args.kd_teacher:
-        teacher = create_model(supported_models, dimensions, args)
+        teacher = create_model(supported_models, dimensions, args, mode='kd_teacher')
         if args.kd_resume:
             teacher = apputils.load_lean_checkpoint(teacher, args.kd_resume)
         dlw = distiller.DistillationLossWeights(args.kd_distill_wt, args.kd_student_wt,
                                                 args.kd_teacher_wt)
-        args.kd_policy = distiller.KnowledgeDistillationPolicy(model, teacher, args.kd_temp, dlw)
+        if args.kd_relationbased:
+            args.kd_policy = kd_relationbased.RelationBasedKDPolicy(model, teacher,
+                                                                    dlw, args.act_mode_8bit)
+        else:
+            args.kd_policy = distiller.KnowledgeDistillationPolicy(model, teacher,
+                                                                   args.kd_temp, dlw)
         compression_scheduler.add_policy(args.kd_policy, starting_epoch=args.kd_start_epoch,
                                          ending_epoch=args.epochs, frequency=1)
 
@@ -489,12 +535,35 @@ def main():
                                                               args.epochs)
                 create_nas_kd_policy(model, compression_scheduler, start_epoch, kd_end_epoch, args)
 
+    if args.evaluate:
+        msglogger.info('Dataset sizes:\n\ttest=%d', len(test_loader.sampler))
+        return evaluate_model(model, criterion, test_loader, pylogger, activations_collectors,
+                              args, compression_scheduler)
+
+    assert train_loader and val_loader
+    msglogger.info('Dataset sizes:\n\ttraining=%d\n\tvalidation=%d\n\ttest=%d',
+                   len(train_loader.sampler), len(val_loader.sampler), len(test_loader.sampler))
+
     vloss = 10**6
     for epoch in range(start_epoch, ending_epoch):
         # pylint: disable=unsubscriptable-object
         if qat_policy is not None and epoch > 0 and epoch == qat_policy['start_epoch']:
+            msglogger.info('\n')
+            msglogger.info('Initiating quantization aware training (QAT)...')
+
             # Fuse the BN parameters into conv layers before Quantization Aware Training (QAT)
             ai8x.fuse_bn_layers(model)
+
+            # Update the optimizer to reflect fused batchnorm layers
+            optimizer = ai8x.update_optimizer(model, optimizer)
+
+            # Update the compression scheduler to reflect the updated optimizer
+            for ep, _ in enumerate(compression_scheduler.policies):
+                for pol in compression_scheduler.policies[ep]:
+                    for attr_key in dir(pol):
+                        attr = getattr(pol, attr_key)
+                        if hasattr(attr, 'optimizer'):
+                            attr.optimizer = optimizer
 
             # Switch model from unquantized to quantized for QAT
             ai8x.initiate_qat(model, qat_policy)
@@ -518,7 +587,8 @@ def main():
         # Train for one epoch
         with collectors_context(activations_collectors["train"]) as collectors:
             train(train_loader, model, criterion, optimizer, epoch, compression_scheduler,
-                  loggers=all_loggers, args=args)
+                  loggers=all_loggers, args=args, loss_optimizer=loss_optimizer)
+
             # distiller.log_weights_sparsity(model, epoch, loggers=all_loggers)
             distiller.log_activation_statistics(epoch, "train", loggers=all_tbloggers,
                                                 collector=collectors["sparsity"])
@@ -545,8 +615,11 @@ def main():
                     checkpoint_name = f'nas_stg{stage}_lev{level}'
 
             with collectors_context(activations_collectors["valid"]) as collectors:
-                top1, top5, vloss, mAP = validate(val_loader, model, criterion, [pylogger],
-                                                  args, epoch, tflogger)
+                if not args.dr:
+                    top1, top5, vloss, mAP = validate(val_loader, model, criterion, [pylogger],
+                                                      args, epoch, tflogger)
+                else:
+                    top1, top5, vloss, mAP = scaf_test(val_loader, model, accuracy_calculator)
                 distiller.log_activation_statistics(epoch, "valid", loggers=all_tbloggers,
                                                     collector=collectors["sparsity"])
                 save_collectors_data(collectors, msglogger.logdir)
@@ -557,7 +630,7 @@ def main():
                 if not args.regression:
                     stats = ('Performance/Validation/', OrderedDict([('Loss', vloss),
                                                                      ('Top1', top1)]))
-                    if args.num_classes > 5:
+                    if args.num_classes > 5 and not args.dr:
                         stats[1]['Top5'] = top5
                 else:
                     stats = ('Performance/Validation/', OrderedDict([('Loss', vloss),
@@ -582,6 +655,9 @@ def main():
                 is_best = False
                 checkpoint_extras = {'current_top1': top1,
                                      'current_mAP': mAP}
+            if args.dr:
+                checkpoint_extras['loss_weights'] = criterion.W
+                checkpoint_extras['loss_optimizer_state_dict'] = loss_optimizer.state_dict()
 
             apputils.save_checkpoint(epoch, args.cnn, model, optimizer=optimizer,
                                      scheduler=compression_scheduler, extras=checkpoint_extras,
@@ -592,7 +668,12 @@ def main():
             compression_scheduler.on_epoch_end(epoch, optimizer)
 
     # Finally run results on the test set
-    test(test_loader, model, criterion, [pylogger], activations_collectors, args=args)
+    if not args.dr:
+        test(test_loader, model, criterion, [pylogger], activations_collectors, args=args)
+
+    if args.copy_output_folder:
+        msglogger.info('Copying output folder to: %s', args.copy_output_folder)
+        shutil.copytree(msglogger.logdir, args.copy_output_folder, dirs_exist_ok=True)
     return None
 
 
@@ -600,19 +681,29 @@ OVERALL_LOSS_KEY = 'Overall Loss'
 OBJECTIVE_LOSS_KEY = 'Objective Loss'
 
 
-def create_model(supported_models, dimensions, args):
+def create_model(supported_models, dimensions, args, mode='default'):
     """Create the model"""
-    module = next(item for item in supported_models if item['name'] == args.cnn)
+    if mode == 'default':
+        module = next(item for item in supported_models if item['name'] == args.cnn)
+    elif mode == 'kd_teacher':
+        module = next(item for item in supported_models if item['name'] == args.kd_teacher)
 
     # Override distiller's input shape detection. This is not a very clean way to do it since
     # we're replacing a protected member.
     distiller.utils._validate_input_shape = (  # pylint: disable=protected-access
         lambda _a, _b: (1, ) + dimensions[:module['dim'] + 1]
     )
+    if mode == 'default':
+        Model = locate(module['module'] + '.' + args.cnn)
+        if not Model:
+            raise RuntimeError("Model " + args.cnn + " not found\n")
+    elif mode == 'kd_teacher':
+        Model = locate(module['module'] + '.' + args.kd_teacher)
+        if not Model:
+            raise RuntimeError("Model " + args.kd_teacher + " not found\n")
 
-    Model = locate(module['module'] + '.' + args.cnn)
-    if not Model:
-        raise RuntimeError("Model " + args.cnn + " not found\n")
+    if args.dr and ('dr' not in module or not module['dr']):
+        raise ValueError("Dimensionality reduction is not supported for this model")
 
     # Set model parameters
     if args.act_mode_8bit:
@@ -633,6 +724,12 @@ def create_model(supported_models, dimensions, args):
     model_args["weight_bits"] = weight_bits
     model_args["bias_bits"] = bias_bits
     model_args["quantize_activation"] = quantize_activation
+
+    if args.dr:
+        model_args["dimensionality"] = args.dr
+
+    if args.backbone_checkpoint:
+        model_args["backbone_checkpoint"] = args.backbone_checkpoint
 
     if args.obj_detection:
         model_args["device"] = args.device
@@ -679,7 +776,7 @@ def create_nas_kd_policy(model, compression_scheduler, epoch, next_state_start_e
 
 
 def train(train_loader, model, criterion, optimizer, epoch,
-          compression_scheduler, loggers, args):
+          compression_scheduler, loggers, args, loss_optimizer=None):
     """Training loop for one epoch."""
     losses = OrderedDict([(OVERALL_LOSS_KEY, tnt.AverageValueMeter()),
                           (OBJECTIVE_LOSS_KEY, tnt.AverageValueMeter())])
@@ -771,7 +868,7 @@ def train(train_loader, model, criterion, optimizer, epoch,
 
         loss = criterion(output, target)
         # TODO Early exit mechanism for Object Detection case is NOT implemented yet
-        if not args.obj_detection:
+        if not args.obj_detection and not args.dr and not args.kd_relationbased:
             if not args.earlyexit_lossweights:
                 # Measure accuracy if the conditions are set. For `Last Batch` only accuracy
                 # calculation last two batches are used as the last batch might include just a few
@@ -816,11 +913,16 @@ def train(train_loader, model, criterion, optimizer, epoch,
 
         # Compute the gradient and do SGD step
         optimizer.zero_grad()
+        if args.dr:
+            loss_optimizer.zero_grad()
+
         loss.backward()
         if compression_scheduler:
             compression_scheduler.before_parameter_optimization(epoch, train_step,
                                                                 steps_per_epoch, optimizer)
         optimizer.step()
+        if args.dr:
+            loss_optimizer.step()
         if compression_scheduler:
             compression_scheduler.on_minibatch_end(epoch, train_step, steps_per_epoch, optimizer)
 
@@ -894,6 +996,23 @@ def update_bn_stats(train_loader, model, args):
         _ = model(inputs)
 
 
+def get_all_embeddings(dataset, model):
+    """Get all embeddings from the test set"""
+    tester = testers.BaseTester()
+    return tester.get_all_embeddings(dataset, model)
+
+
+def scaf_test(val_loader, model, accuracy_calculator):
+    """Perform test for SCAF"""
+    test_embeddings, test_labels = get_all_embeddings(val_loader.dataset, model)
+    test_labels = test_labels.squeeze(1)
+    accuracies = accuracy_calculator.get_accuracy(
+        test_embeddings, test_labels, None, None, True
+    )
+    msglogger.info('Test set accuracy (Precision@1) = %f', accuracies['precision_at_1'])
+    return accuracies["precision_at_1"], 0, 0, 0
+
+
 def validate(val_loader, model, criterion, loggers, args, epoch=-1, tflogger=None):
     """Model validation"""
     if epoch > -1:
@@ -917,11 +1036,11 @@ def test(test_loader, model, criterion, loggers, activations_collectors, args):
             with torch.no_grad():
                 global weight_min, weight_max, weight_count  # pylint: disable=global-statement
                 global weight_sum, weight_stddev, weight_mean  # pylint: disable=global-statement
-                weight_min = torch.tensor(float('inf')).to(args.device)
-                weight_max = torch.tensor(float('-inf')).to(args.device)
-                weight_count = torch.tensor(0, dtype=torch.int).to(args.device)
-                weight_sum = torch.tensor(0.0).to(args.device)
-                weight_stddev = torch.tensor(0.0).to(args.device)
+                weight_min = torch.tensor(float('inf'), device=args.device)
+                weight_max = torch.tensor(float('-inf'), device=args.device)
+                weight_count = torch.tensor(0, dtype=torch.int, device=args.device)
+                weight_sum = torch.tensor(0.0, device=args.device)
+                weight_stddev = torch.tensor(0.0, device=args.device)
 
                 def traverse_pass1(m):
                     """
@@ -967,14 +1086,16 @@ def test(test_loader, model, criterion, loggers, activations_collectors, args):
 
 def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=None):
     """Execute the validation/test loop."""
-    losses = {'objective_loss': tnt.AverageValueMeter()}
+    losses = OrderedDict([(OVERALL_LOSS_KEY, tnt.AverageValueMeter()),
+                          (OBJECTIVE_LOSS_KEY, tnt.AverageValueMeter())])
+
     if args.obj_detection:
         map_calculator = MeanAveragePrecision(
             # box_format='xyxy',  # Enable in torchmetrics > 0.6
             # iou_type='bbox',  # Enable in torchmetrics > 0.6
             class_metrics=False,
             # iou_thresholds=[0.5],  # Enable in torchmetrics > 0.6
-        )
+        ).to(args.device)
         mAP = 0.00
     if not args.regression:
         classerr = tnt.ClassErrorMeter(accuracy=True, topk=(1, min(args.num_classes, 5)))
@@ -985,7 +1106,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
         """ Save tensor `t` to file handle `f` in CSV format """
         if t.dim() > 1:
             if not regression:
-                t = torch.nn.functional.softmax(t, dim=1)
+                t = nn.functional.softmax(t, dim=1)
             np.savetxt(f, t.reshape(t.shape[0], t.shape[1], -1).cpu().numpy().mean(axis=2),
                        delimiter=",")
         else:
@@ -1041,6 +1162,8 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
     mAP = 0.0
     have_mAP = False
     with torch.no_grad():
+        m = model.module if isinstance(model, nn.DataParallel) else model
+
         for validation_step, (inputs, target_temp) in enumerate(data_loader):
             if args.obj_detection:
                 if not object_detection_utils.check_target_exists(target_temp):
@@ -1065,10 +1188,10 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                     output_boxes /= 128.
                     output_conf /= 128.
 
-                    if (hasattr(model, 'are_locations_wide') and model.are_locations_wide):
+                    if (hasattr(m, 'are_locations_wide') and m.are_locations_wide):
                         output_boxes /= 128.
 
-                    if (hasattr(model, 'are_scores_wide') and model.are_scores_wide):
+                    if (hasattr(m, 'are_scores_wide') and m.are_scores_wide):
                         output_conf /= 128.
 
                 output = (output_boxes, output_conf)
@@ -1076,8 +1199,6 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                 if target[0]:
                     # .module is added to model for access in multi GPU environments
                     # as https://github.com/pytorch/pytorch/issues/16885 has not been merged yet
-                    m = model.module if isinstance(model, nn.DataParallel) else model
-
                     det_boxes_batch, det_labels_batch, det_scores_batch = \
                         m.detect_objects(output_boxes, output_conf,
                                          min_score=obj_detection_params['nms']['min_score'],
@@ -1119,7 +1240,10 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
             else:
                 inputs, target = inputs.to(args.device), target_temp.to(args.device)
                 # compute output from model
-                output = model(inputs)
+                if args.kd_relationbased:
+                    output = args.kd_policy.forward(inputs)
+                else:
+                    output = model(inputs)
                 if args.out_fold_ratio != 1:
                     output = ai8x.unfold_batch(output, args.out_fold_ratio)
 
@@ -1134,7 +1258,8 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                         target /= 128.
 
             if args.generate_sample is not None and args.act_mode_8bit and not sample_saved:
-                sample.generate(args.generate_sample, inputs, target, output, args.dataset, False)
+                sample.generate(args.generate_sample, inputs, target, output,
+                                args.dataset, False, args.slice_sample)
                 sample_saved = True
 
             if args.csv_prefix is not None:
@@ -1145,10 +1270,14 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
             if not args.earlyexit_thresholds:
                 # compute loss
                 loss = criterion(output, target)
+                if args.kd_relationbased:
+                    agg_loss = args.kd_policy.before_backward_pass(None, None, None, None,
+                                                                   loss, None)
+                    losses[OVERALL_LOSS_KEY].add(agg_loss.overall_loss.item())
                 # measure accuracy and record loss
-                losses['objective_loss'].add(loss.item())
+                losses[OBJECTIVE_LOSS_KEY].add(loss.item())
 
-                if not args.obj_detection:
+                if not args.obj_detection and not args.kd_relationbased:
                     if len(output.data.shape) <= 2 or args.regression:
                         classerr.add(output.data, target)
                     else:
@@ -1168,13 +1297,19 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
             if steps_completed % args.print_freq == 0 or steps_completed == total_steps:
                 if args.display_prcurves and tflogger is not None:
                     # TODO PR Curve generation for Object Detection case is NOT implemented yet
-                    class_probs_batch = [torch.nn.functional.softmax(el, dim=0) for el in output]
+                    class_probs_batch = [nn.functional.softmax(el, dim=0) for el in output]
                     _, class_preds_batch = torch.max(output, 1)
                     class_probs.append(class_probs_batch)
                     class_preds.append(class_preds_batch)
 
                 if not args.earlyexit_thresholds:
-                    if args.obj_detection:
+                    if args.kd_relationbased:
+                        stats = (
+                            '',
+                            OrderedDict([('Loss', losses[OBJECTIVE_LOSS_KEY].mean),
+                                         ('Overall Loss', losses[OVERALL_LOSS_KEY].mean)])
+                        )
+                    elif args.obj_detection:
                         # Only run compute() if there is at least one new update()
                         if have_mAP:
                             # Remove [0] in new torchmetrics
@@ -1182,14 +1317,14 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                             have_mAP = False
                         stats = (
                             '',
-                            OrderedDict([('Loss', losses['objective_loss'].mean),
+                            OrderedDict([('Loss', losses[OBJECTIVE_LOSS_KEY].mean),
                                          ('mAP', mAP)])
                         )
                     else:
                         if not args.regression:
                             stats = (
                                 '',
-                                OrderedDict([('Loss', losses['objective_loss'].mean),
+                                OrderedDict([('Loss', losses[OBJECTIVE_LOSS_KEY].mean),
                                             ('Top1', classerr.value(1))])
                             )
                             if args.num_classes > 5:
@@ -1197,7 +1332,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                         else:
                             stats = (
                                 '',
-                                OrderedDict([('Loss', losses['objective_loss'].mean),
+                                OrderedDict([('Loss', losses[OBJECTIVE_LOSS_KEY].mean),
                                             ('MSE', classerr.value())])
                             )
                 else:
@@ -1265,26 +1400,33 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
 
     if not args.earlyexit_thresholds:
 
+        if args.kd_relationbased:
+
+            msglogger.info('==> Overall Loss: %.3f\n',
+                           losses[OVERALL_LOSS_KEY].mean)
+
+            return 0, 0, losses[OVERALL_LOSS_KEY].mean, 0
+
         if args.obj_detection:
 
             msglogger.info('==> mAP: %.5f    Loss: %.3f\n',
                            mAP,
-                           losses['objective_loss'].mean)
+                           losses[OBJECTIVE_LOSS_KEY].mean)
 
-            return 0, 0, losses['objective_loss'].mean, mAP
+            return 0, 0, losses[OBJECTIVE_LOSS_KEY].mean, mAP
 
         if not args.regression:
             if args.num_classes > 5:
                 msglogger.info('==> Top1: %.3f    Top5: %.3f    Loss: %.3f\n',
                                classerr.value()[0], classerr.value()[1],
-                               losses['objective_loss'].mean)
+                               losses[OBJECTIVE_LOSS_KEY].mean)
             else:
                 msglogger.info('==> Top1: %.3f    Loss: %.3f\n',
-                               classerr.value()[0], losses['objective_loss'].mean)
+                               classerr.value()[0], losses[OBJECTIVE_LOSS_KEY].mean)
         else:
             msglogger.info('==> MSE: %.5f    Loss: %.3f\n',
-                           classerr.value(), losses['objective_loss'].mean)
-            return classerr.value(), .0, losses['objective_loss'].mean, 0
+                           classerr.value(), losses[OBJECTIVE_LOSS_KEY].mean)
+            return classerr.value(), .0, losses[OBJECTIVE_LOSS_KEY].mean, 0
 
         if args.display_confusion:
             msglogger.info('==> Confusion:\n%s\n', str(confusion.value()))
@@ -1294,7 +1436,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                                                    dataformats='HWC')
         if not args.regression:
             return classerr.value(1), classerr.value(min(args.num_classes, 5)), \
-                losses['objective_loss'].mean, 0
+                losses[OBJECTIVE_LOSS_KEY].mean, 0
     # else:
     total_top1, total_top5, losses_exits_stats = earlyexit_validate_stats(args)
     return total_top1, total_top5, losses_exits_stats[args.num_exits-1], 0
@@ -1311,7 +1453,21 @@ def update_training_scores_history(perf_scores_history, model, top1, top5, mAP, 
                                      'top1': top1, 'top5': top5, 'mAP': mAP, 'vloss': -vloss,
                                      'epoch': epoch}))
 
-    if args.obj_detection:
+    if args.kd_relationbased:
+
+        # Keep perf_scores_history sorted from best to worst based on overall loss
+        # overall_loss = student_loss*student_weight + distillation_loss*distillation_weight
+        if not args.sparsity_perf:
+            perf_scores_history.sort(key=operator.attrgetter('vloss', 'epoch'),
+                                     reverse=True)
+        else:
+            perf_scores_history.sort(key=operator.attrgetter('params_nnz_cnt', 'vloss', 'epoch'),
+                                     reverse=True)
+        for score in perf_scores_history[:args.num_best_scores]:
+            msglogger.info('==> Best [Overall Loss: %f on epoch: %d]',
+                           -score.vloss, score.epoch)
+
+    elif args.obj_detection:
 
         # Keep perf_scores_history sorted from best to worst
         if not args.sparsity_perf:
@@ -1669,7 +1825,7 @@ def create_activation_stats_collectors(model, *phases):
         "mean_channels": SummaryActivationStatsCollector(model, "mean_channels",
                                                          distiller.utils.
                                                          activation_channels_means),
-        "records":       RecordsActivationStatsCollector(model, classes=[torch.nn.Conv2d])
+        "records":       RecordsActivationStatsCollector(model, classes=[nn.Conv2d])
     })
 
     return {k: (genCollectors() if k in phases else missingdict())
@@ -1694,23 +1850,9 @@ def save_collectors_data(collectors, directory):
         collector.save(workbook)
 
 
-def check_pytorch_version():
-    """Ensure PyTorch >= 1.5.0"""
-    if parse_version(torch.__version__) < parse_version('1.5.0'):
-        print("\nNOTICE:")
-        print("This software requires at least PyTorch version 1.5.0 due to "
-              "PyTorch API changes which are not backward-compatible.\n"
-              "Please install PyTorch 1.5.0 or its derivative.\n"
-              "If you are using a virtual environment, do not forget to update it:\n"
-              "  1. Deactivate the old environment\n"
-              "  2. Install the new environment\n"
-              "  3. Activate the new environment")
-        sys.exit(1)
-
-
 def update_old_model_params(model_path, model_new):
     """Adds missing model parameters added with default values.
-    This is mainly due to the saved checkpoint is from previous versions of the repo.
+    This is mainly due to the saved checkpoints from previous versions of the repo.
     New model is saved to `model_path` and the old model copied into the same file_path with
     `__obsolete__` prefix."""
     is_model_old = False
@@ -1741,7 +1883,6 @@ def update_old_model_params(model_path, model_new):
 
 if __name__ == '__main__':
     try:
-        check_pytorch_version()
         np.set_printoptions(threshold=sys.maxsize, linewidth=190)
         torch.set_printoptions(threshold=sys.maxsize, linewidth=190)
 

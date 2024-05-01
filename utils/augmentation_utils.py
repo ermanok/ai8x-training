@@ -1,19 +1,33 @@
-###################################################################################################
 #
-# Copyright (C) 2023 Maxim Integrated Products, Inc. All Rights Reserved.
-#
-# Maxim Integrated Products, Inc. Default Copyright Notice:
-# https://www.maximintegrated.com/en/aboutus/legal/copyrights.html
-###################################################################################################
-
-#
-# GitHub repo for the below helper methods:
-# https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection:
 # MIT License
+#
 # Copyright (c) 2019 Sagar Vinodababu
-
-# Some augmentation functions below have been adapted from
-# From https://github.com/amdegroot/ssd.pytorch/blob/master/utils/augmentations.py
+# Copyright (c) 2017 Max deGroot, Ellis Brown
+# Portions Copyright (C) 2023 Maxim Integrated Products, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# Helper methods originate from:
+# https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection
+# Some augmentation functions have been adapted from:
+# https://github.com/amdegroot/ssd.pytorch/blob/master/utils/augmentations.py
+#
 
 """ Some utility functions for Augmentation Tasks """
 import random
@@ -78,7 +92,7 @@ def expand(image, boxes, filler):
     new_w = int(scale * original_w)
 
     # Create such an image with the filler
-    filler = torch.FloatTensor(filler)  # (3)
+    filler = torch.tensor(filler, dtype=torch.float)  # (3)
     new_image = torch.ones((3, new_h, new_w), dtype=torch.float) * \
         filler.unsqueeze(1).unsqueeze(1)  # (3, new_h, new_w)
 
@@ -98,7 +112,7 @@ def expand(image, boxes, filler):
     # Adjust bounding boxes' coordinates accordingly
     # (n_objects, 4), n_objects is the no. of objects in this image
     new_boxes = \
-        boxes + torch.FloatTensor([left, top, left, top]).unsqueeze(0)
+        boxes + torch.tensor([left, top, left, top], dtype=torch.float).unsqueeze(0)
 
     return new_image, new_boxes
 
@@ -180,7 +194,7 @@ def random_crop(image, boxes, labels, difficulties):
             right = left + new_w
             top = random.randint(0, original_h - new_h)
             bottom = top + new_h
-            crop = torch.FloatTensor([left, top, right, bottom])  # (4)
+            crop = torch.tensor([left, top, right, bottom], dtype=torch.float)  # (4)
 
             # Calculate Jaccard overlap between the crop and the bounding boxes
             # (1, n_objects), n_objects is the no. of objects in this image
@@ -242,13 +256,16 @@ def resize(image, boxes, dims=(300, 300), return_percent_coords=True):
 
     # Resize bounding boxes
     # old_dims =
-    # torch.FloatTensor([image.width, image.height, image.width, image.height]).unsqueeze(0)
-    old_dims = torch.FloatTensor(
-        [image.shape[2], image.shape[1], image.shape[2], image.shape[1]]).unsqueeze(0)
+    # torch.tensor([image.width, image.height, image.width, image.height],
+    #              dtype=torch.float).unsqueeze(0)
+    old_dims = torch.tensor(
+        [image.shape[2], image.shape[1], image.shape[2], image.shape[1]],
+        dtype=torch.float).unsqueeze(0)
     new_boxes = boxes / old_dims  # percent coordinates
 
     if not return_percent_coords:
-        new_dims = torch.FloatTensor([dims[1], dims[0], dims[1], dims[0]]).unsqueeze(0)
+        new_dims = torch.tensor([dims[1], dims[0], dims[1], dims[0]],
+                                dtype=torch.float).unsqueeze(0)
         new_boxes = new_boxes * new_dims
 
     return new_image, new_boxes
