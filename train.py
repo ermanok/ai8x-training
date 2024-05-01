@@ -828,21 +828,19 @@ def train(train_loader, model, criterion, optimizer, epoch,
     model.train()
     acc_stats = []
     end = time.time()
-    for train_step, (inputs, target) in enumerate(train_loader):
+    for train_step, (inputs, target_temp) in enumerate(train_loader):
         # Measure data loading time
         data_time.add(time.time() - end)
 
         if args.obj_detection:
-            boxes_list = [elem[0] for elem in target]
-            labels_list = [elem[1] for elem in target]
+            target = tuple()
+            for target_idx in range(len(target_temp[0])):
+                temp_list = [elem[target_idx].to(args.device) for elem in target_temp]
+                target = target + (temp_list, )
 
             inputs = inputs.to(args.device)
-            boxes_list = [boxes.to(args.device) for boxes in boxes_list]
-            labels_list = [labels.to(args.device) for labels in labels_list]
-
-            target = (boxes_list, labels_list)
         else:
-            inputs, target = inputs.to(args.device), target.to(args.device)
+            inputs, target = inputs.to(args.device), target_temp.to(args.device)
 
         # Set nas parameters if necessary
         if args.nas:
@@ -1166,22 +1164,21 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
     with torch.no_grad():
         m = model.module if isinstance(model, nn.DataParallel) else model
 
-        for validation_step, (inputs, target) in enumerate(data_loader):
+        for validation_step, (inputs, target_temp) in enumerate(data_loader):
             if args.obj_detection:
-                if not object_detection_utils.check_target_exists(target):
+                if not object_detection_utils.check_target_exists(target_temp):
                     print(f'No target in batch. Ep: {epoch}, validation_step: {validation_step}')
                     continue
 
-                boxes_list = [elem[0].to(args.device) for elem in target]
-                labels_list = [elem[1].to(args.device) for elem in target]
+                inputs = inputs.to(args.device)
                 filtered_all_images_boxes = None
 
-                # Adjust ground truth index as mAP calculator uses 0-indexed class labels
-                labels_list_for_map = [elem[1].to(args.device) - 1 for elem in target]
+                target = tuple()
+                for target_idx in range(len(target_temp[0])):
+                    temp_list = [elem[target_idx].to(args.device) for elem in target_temp]
+                    target = target + (temp_list, )
 
-                inputs = inputs.to(args.device)
-
-                target = (boxes_list, labels_list)
+                labels_list_for_map = [elem[-1].to(args.device) - 1 for elem in target_temp]
 
                 # compute output from model
                 output_boxes, output_conf = model(inputs)
@@ -1199,7 +1196,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
 
                 output = (output_boxes, output_conf)
 
-                if boxes_list:
+                if target[0]:
                     # .module is added to model for access in multi GPU environments
                     # as https://github.com/pytorch/pytorch/issues/16885 has not been merged yet
                     det_boxes_batch, det_labels_batch, det_scores_batch = \
@@ -1223,7 +1220,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                         filtered_all_images_labels = [e - 1 for e in filtered_all_images_labels]
 
                         # Prepare truths
-                        boxes = torch.cat(boxes_list)
+                        boxes = torch.cat(target[0])
                         labels = torch.cat(labels_list_for_map)
 
                         gt = [{'boxes': boxes, 'labels': labels}]
@@ -1241,7 +1238,7 @@ def _validate(data_loader, model, criterion, loggers, args, epoch=-1, tflogger=N
                         map_calculator.update(preds=preds, target=gt)
                         have_mAP = True
             else:
-                inputs, target = inputs.to(args.device), target.to(args.device)
+                inputs, target = inputs.to(args.device), target_temp.to(args.device)
                 # compute output from model
                 if args.kd_relationbased:
                     output = args.kd_policy.forward(inputs)
