@@ -95,17 +95,19 @@ def imresizemex(img_in, weights, indices, dim):
                 w = weights[i_w, :]
                 ind = indices[i_w, :]
                 im_slice = img_in[ind, i_img].astype(np.float64)
-                img_out[i_w, i_img] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
+                img_out[i_w, i_img] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T),
+                                             axis=0)
     elif dim == 1:
         for i_img in range(in_shape[0]):
             for i_w in range(w_shape[0]):
                 w = weights[i_w, :]
                 ind = indices[i_w, :]
                 im_slice = img_in[i_img, ind].astype(np.float64)
-                img_out[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
+                img_out[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T),
+                                             axis=0)
 
     if img_in.dtype == np.uint8:
-        img_out = np.clip(outimg, 0, 255)
+        img_out = np.clip(img_out, 0, 255)
         return np.around(img_out).astype(np.uint8)
 
     return img_out
@@ -121,7 +123,7 @@ def imresizevec(img_in, weights, indices, dim):
         weights = weights.reshape((1, wshape[0], wshape[2], 1))
         img_out = np.sum(weights*((img_in[:, indices].squeeze(axis=2)).astype(np.float64)), axis=2)
 
-    if in_img.dtype == np.uint8:
+    if img_in.dtype == np.uint8:
         img_out = np.clip(img_out, 0, 255)
         return np.around(img_out).astype(np.uint8)
 
