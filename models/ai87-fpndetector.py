@@ -285,7 +285,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
     The FeaturePyramidNetworkDetector network consisting
         * ResNet Backbone Network
         * Feature Pyramid Network
-        * Classificaiton Network
+        * Classification Network
         * Regression Network
     """
 
@@ -319,7 +319,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
 
         self.backbone = ResNetBackbone(preprocess_channels)
         self.fpn = FPN(channels_32_40, channels_16_20, channels_8_10, channels_4_5, **kwargs)
-        self.classication_net = ClassificationModel(
+        self.classification_net = ClassificationModel(
             num_classes=self.num_classes, feature_size=64, wide=wide_scores, **kwargs)
         self.regression_net = RegressionModel(feature_size=64, wide=wide_locations, **kwargs)
 
@@ -330,7 +330,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
         The FeaturePyramidNetworkDetector forward propagation
             * Runs preprocessing layers and ResNet Backbone Network
             * Runs Feature Pyramid Network
-            * Runs Classificaiton Network for all features
+            * Runs Classification Network for all features
             * Runs Regression Network for all features
         """
 
@@ -345,7 +345,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
             torch.cat([self.regression_net(feature) for feature in pyramide_features],
                       dim=1)
         classification = \
-            torch.cat([self.classication_net(feature) for feature in pyramide_features],
+            torch.cat([self.classification_net(feature) for feature in pyramide_features],
                       dim=1)
 
         return regression, classification
@@ -393,7 +393,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
                                                 (obj_scale*fmap_dim_scales[fmap]) * sqrt(ratio),
                                                 (obj_scale*fmap_dim_scales[fmap]) / sqrt(ratio)])
 
-        prior_boxes = torch.FloatTensor(prior_boxes).to(device)  # (num_priors, 4)
+        prior_boxes = torch.tensor(prior_boxes, dtype=torch.float, device=device)
         prior_boxes.clamp_(0, 1)  # (num_priors, 4)
 
         return prior_boxes
@@ -464,7 +464,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
 
                 # A torch.bool tensor to keep track of which predicted boxes to suppress
                 # True implies suppress, False implies don't suppress
-                suppress = torch.zeros((n_above_min_score), dtype=torch.bool).to(self.device)
+                suppress = torch.zeros((n_above_min_score), dtype=torch.bool, device=self.device)
                 # (n_qualified)
 
                 # Consider each box in order of decreasing scores
@@ -485,14 +485,16 @@ class FeaturePyramidNetworkDetector(nn.Module):
                 # Store only unsuppressed boxes for this class
                 image_boxes.append(class_decoded_locs[~suppress])
                 image_labels.append(
-                    torch.LongTensor((~suppress).sum().item() * [c]).to(self.device))
+                    torch.tensor((~suppress).sum().item() * [c],
+                                 dtype=torch.long, device=self.device))
                 image_scores.append(class_scores[~suppress])
 
             # If no object in any class is found, store a placeholder for 'background'
             if len(image_boxes) == 0:
-                image_boxes.append(torch.FloatTensor([[0., 0., 1., 1.]]).to(self.device))
-                image_labels.append(torch.LongTensor([0]).to(self.device))
-                image_scores.append(torch.FloatTensor([0.]).to(self.device))
+                image_boxes.append(torch.tensor([[0., 0., 1., 1.]],
+                                                dtype=torch.float, device=self.device))
+                image_labels.append(torch.tensor([0], dtype=torch.long, device=self.device))
+                image_scores.append(torch.tensor([0.], dtype=torch.float, device=self.device))
 
             # Concatenate into single tensors
             image_boxes = torch.cat(image_boxes, dim=0)  # (n_objects, 4)
@@ -524,7 +526,7 @@ class FeaturePyramidNetworkDetector(nn.Module):
         """
         Returns whether model uses wide outputs for the classification part (box predictions)
         """
-        return self.classication_net.conv5.wide
+        return self.classification_net.conv5.wide
 
 
 def ai87fpndetector(pretrained=False, **kwargs):

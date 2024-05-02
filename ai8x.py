@@ -95,6 +95,8 @@ class QuantizationFunction(Function):
     nearest integer.
     The backward pass is straight through.
     """
+    # pylint: disable=abstract-method
+
     @staticmethod
     def forward(_, x, bits=8, extra_bit_shift=0):  # pylint: disable=arguments-differ
         """Forward prop"""
@@ -138,6 +140,8 @@ class FloorFunction(Function):
     The forward pass returns the integer floor.
     The backward pass is straight through.
     """
+    # pylint: disable=abstract-method
+
     @staticmethod
     def forward(_, x):  # pylint: disable=arguments-differ
         """Forward prop"""
@@ -158,6 +162,8 @@ class AvgPoolFloorFunction(Function):
     ceil for negative numbers.
     The backward pass is straight through.
     """
+    # pylint: disable=abstract-method
+
     @staticmethod
     def forward(_, x):  # pylint: disable=arguments-differ
         """Forward prop"""
@@ -207,6 +213,8 @@ class RoundFunction(Function):
     The forward pass returns the integer rounded.
     The backward pass is straight through.
     """
+    # pylint: disable=abstract-method
+
     @staticmethod
     def forward(_, x):  # pylint: disable=arguments-differ
         """Forward prop"""
@@ -438,7 +446,7 @@ class One(nn.Module):
     """
     def forward(self, x):  # pylint: disable=arguments-differ
         """Forward prop"""
-        return torch.ones(1).to(x.device)
+        return torch.ones(1, device=x.device)
 
 
 class WeightScale(nn.Module):
@@ -763,8 +771,8 @@ class Conv2d(QuantizationAwareModule):
                 assert dev.device != 84
                 opn = nn.ConvTranspose2d(in_channels, out_channels,
                                          kernel_size=kernel_size, stride=stride,
-                                         output_padding=1,
-                                         padding=padding, dilation=dilation, bias=bias)
+                                         output_padding=1, padding=padding,
+                                         dilation=dilation, bias=bias, groups=groups)
             else:
                 raise ValueError('Unsupported operation')
         else:
@@ -1016,6 +1024,32 @@ class ConvTranspose2d(Conv2d):
         super().__init__(*args, op='ConvTranspose2d', **kwargs)
 
 
+class FusedConvTranspose2dReLU(ConvTranspose2d):
+    """
+    Fused Transposed 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, activation='ReLU', **kwargs)
+
+
+class FusedConvTranspose2dAbs(ConvTranspose2d):
+    """
+    Fused Transposed 2D Convolution and Abs
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, activation='Abs', **kwargs)
+
+
+class FusedConvTranspose2dBNReLU(FusedConvTranspose2dReLU):
+    """
+    Fused Transposed 2D Convolution and BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        if 'batchnorm' not in kwargs:
+            kwargs['batchnorm'] = 'Affine'
+        super().__init__(*args, **kwargs)
+
+
 class FusedMaxPoolConvTranspose2d(ConvTranspose2d):
     """
     Fused 2D Max Pool, Transposed 2D Convolution and Activation ('ReLU', 'Abs', None)
@@ -1030,6 +1064,16 @@ class FusedMaxPoolConvTranspose2dReLU(FusedMaxPoolConvTranspose2d):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, activation='ReLU', **kwargs)
+
+
+class FusedMaxPoolConvTranspose2dBNReLU(FusedMaxPoolConvTranspose2dReLU):
+    """
+    Fused 2d Max Pool, Transposed 2D Convolution and BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        if 'batchnorm' not in kwargs:
+            kwargs['batchnorm'] = 'Affine'
+        super().__init__(*args, **kwargs)
 
 
 class FusedMaxPoolConvTranspose2dAbs(FusedMaxPoolConvTranspose2d):
@@ -1056,6 +1100,16 @@ class FusedAvgPoolConvTranspose2dReLU(FusedAvgPoolConvTranspose2d):
         super().__init__(*args, activation='ReLU', **kwargs)
 
 
+class FusedAvgPoolConvTranspose2dBNReLU(FusedAvgPoolConvTranspose2dReLU):
+    """
+    Fused 2d Avg Pool, Transposed 2D Convolution, BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        if 'batchnorm' not in kwargs:
+            kwargs['batchnorm'] = 'Affine'
+        super().__init__(*args, **kwargs)
+
+
 class FusedAvgPoolConvTranspose2dAbs(FusedAvgPoolConvTranspose2d):
     """
     Fused 2D Avg Pool, Transposed 2D Convolution and Abs
@@ -1064,20 +1118,76 @@ class FusedAvgPoolConvTranspose2dAbs(FusedAvgPoolConvTranspose2d):
         super().__init__(*args, activation='Abs', **kwargs)
 
 
-class FusedConvTranspose2dReLU(ConvTranspose2d):
+class DepthwiseConvTranspose2d(ConvTranspose2d):
     """
-    Fused Transposed 2D Convolution and ReLU
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, activation='ReLU', **kwargs)
-
-
-class FusedConvTranspose2dAbs(ConvTranspose2d):
-    """
-    Fused Transposed 2D Convolution and Abs
+    AI8X - Depthwise Transposed 2D Convolution
     """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, activation='Abs', **kwargs)
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedDepthwiseConvTranspose2dReLU(FusedConvTranspose2dReLU):
+    """
+    AI8X - Fused Depthwise Transposed 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedDepthwiseConvTranspose2dBNReLU(FusedConvTranspose2dBNReLU):
+    """
+    AI8X - Fused Depthwise Transposed 2D Convolution, BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedAvgPoolDepthwiseConvTranspose2d(FusedAvgPoolConvTranspose2d):
+    """
+    AI8X - Fused 2D Avg Pool, Depthwise Transposed 2D Convolution and no activation
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedAvgPoolDepthwiseConvTranspose2dReLU(FusedAvgPoolConvTranspose2dReLU):
+    """
+    AI8X - Fused 2D Avg Pool, Depthwise Transposed 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedAvgPoolDepthwiseConvTranspose2dBNReLU(FusedAvgPoolConvTranspose2dBNReLU):
+    """
+    AI8X - Fused 2D Avg Pool, Depthwise Transposed 2D Convolution, BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedMaxPoolDepthwiseConvTranspose2d(FusedMaxPoolConvTranspose2d):
+    """
+    AI8X - Fused 2D Max Pool, Depthwise Transposed 2D Convolution and no activation
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedMaxPoolDepthwiseConvTranspose2dReLU(FusedMaxPoolConvTranspose2dReLU):
+    """
+    AI8X - Fused 2D Max Pool, Depthwise Transposed 2D Convolution and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
+
+
+class FusedMaxPoolDepthwiseConvTranspose2dBNReLU(FusedMaxPoolConvTranspose2dBNReLU):
+    """
+    AI8X - Fused 2D Max Pool, Depthwise Transposed 2D Convolution, BatchNorm and ReLU
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, groups=args[0], **kwargs)
 
 
 class FusedSoftwareLinearReLU(nn.Module):
@@ -1644,30 +1754,27 @@ def initiate_qat(m, qat_policy):
     """
     Modify model `m` to start quantization aware training.
     """
-    def _initiate_qat(m):
-        for attr_str in dir(m):
-            target_attr = getattr(m, attr_str)
-            if isinstance(target_attr, QuantizationAwareModule):
-                if 'shift_quantile' in qat_policy:
-                    target_attr.init_module(qat_policy['weight_bits'],
-                                            qat_policy['weight_bits'],
-                                            True, qat_policy['shift_quantile'])
-                else:
-                    target_attr.init_module(qat_policy['weight_bits'],
-                                            qat_policy['weight_bits'], True, 1.0)
-                if 'overrides' in qat_policy:
-                    if attr_str in qat_policy['overrides']:
-                        weight_field = qat_policy['overrides'][attr_str]['weight_bits']
-                        if 'shift_quantile' in qat_policy:
-                            target_attr.init_module(weight_field, weight_field,
-                                                    True, qat_policy['shift_quantile'])
-                        else:
-                            target_attr.init_module(weight_field,
-                                                    weight_field, True, 1.0)
+    if isinstance(m, nn.DataParallel):
+        m = m.module
 
-                setattr(m, attr_str, target_attr)
-
-    m.apply(_initiate_qat)
+    for name, module in m.named_modules():
+        if isinstance(module, QuantizationAwareModule) and hasattr(module, 'weight_bits'):
+            if 'shift_quantile' in qat_policy:
+                module.init_module(qat_policy['weight_bits'],
+                                   qat_policy['weight_bits'],
+                                   True, qat_policy['shift_quantile'])
+            else:
+                module.init_module(qat_policy['weight_bits'],
+                                   qat_policy['weight_bits'], True, 1.0)
+            if 'overrides' in qat_policy:
+                if name in qat_policy['overrides']:
+                    weight_field = qat_policy['overrides'][name]['weight_bits']
+                    if 'shift_quantile' in qat_policy:
+                        module.init_module(weight_field, weight_field,
+                                           True, qat_policy['shift_quantile'])
+                    else:
+                        module.init_module(weight_field,
+                                           weight_field, True, 1.0)
 
 
 def update_model(m):
@@ -1683,6 +1790,47 @@ def update_model(m):
                 setattr(m, attr_str, target_attr)
 
     m.apply(_update_model)
+
+
+def update_optimizer(m, optimizer):
+    """
+    Update optimizer after model 'm' had a batchnorm fusion.
+    This is needed to update the optimizer state_dict to match the new model parameters.
+    """
+    old_state_dict = optimizer.state_dict()
+    old_groups = optimizer.param_groups
+    optimizer = type(optimizer)(m.parameters(), **optimizer.defaults)
+    new_state_dict = optimizer.state_dict()
+    groups = optimizer.param_groups
+
+    for x, g in enumerate(groups):
+        key_reduce = 0
+        for p in g['params']:
+            if (len(p.shape) == 1 and p.shape[0] == 1):
+                continue
+            nf_keys = []
+            for key in old_state_dict['state'].keys():
+                sub_keys = old_state_dict['state'][key].keys()
+                if old_groups[x]['params'][int(key)].shape == p.shape:
+                    for y, sub_key in enumerate(sub_keys):
+                        if y == 0:
+                            new_state_dict['state'][key-key_reduce] = \
+                                {sub_key: old_state_dict['state'][key][sub_key]}
+                        else:
+                            new_state_dict['state'][key-key_reduce][sub_key] = \
+                                old_state_dict['state'][key][sub_key]
+                    old_state_dict['state'].pop(key)
+                    break
+                nf_keys.append(key)
+                key_reduce += 1
+            for key in nf_keys:
+                old_state_dict['state'].pop(key)
+        for key in old_state_dict['param_groups'][x].keys():
+            if key != 'params':
+                new_state_dict['param_groups'][x][key] = \
+                    old_state_dict['param_groups'][x][key]
+    optimizer.load_state_dict(new_state_dict)
+    return optimizer
 
 
 def fuse_bn_layers(m):
@@ -1705,9 +1853,9 @@ def fuse_bn_layers(m):
                 gamma = target_attr.bn.bias
 
                 if beta is None:
-                    beta = torch.ones(w.shape[0]).to(device)
+                    beta = torch.ones(w.shape[0], device=device)
                 if gamma is None:
-                    gamma = torch.zeros(w.shape[0]).to(device)
+                    gamma = torch.zeros(w.shape[0], device=device)
 
                 beta = 0.25 * beta
                 gamma = 0.25 * gamma
@@ -1759,3 +1907,18 @@ def onnx_export_prep(m, simplify=False):
                 setattr(m, attr_str, ScalerONNX())
 
     m.apply(_onnx_export_prep)
+
+
+class bayer_filter:
+    """
+    Implement bayer filter to rgb images
+    """
+    def __call__(self, img):
+        out = torch.zeros(1, img.shape[1], img.shape[2])
+
+        out[0, 0::2, 1::2] = img[2, 0::2, 1::2]
+        out[0, 0::2, 0::2] = img[1, 0::2, 0::2]
+        out[0, 1::2, 1::2] = img[1, 1::2, 1::2]
+        out[0, 1::2, 0::2] = img[0, 1::2, 0::2]
+
+        return out
