@@ -172,7 +172,7 @@ class QRCodeGenerator(Dataset):
             labels = transform_out['class_labels']
 
         if self.transform is not None:
-            image = self.transfom(image)
+            image = self.transform(image)
 
         if self.segment_out:
             return image, gt_map

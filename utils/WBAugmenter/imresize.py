@@ -82,48 +82,50 @@ def contributions(in_length, out_length, scale, kernel, k_width):
     return weights, indices
 
 
-def imresizemex(inimg, weights, indices, dim):
+def imresizemex(img_in, weights, indices, dim):
     """imresizemex function"""
-    in_shape = inimg.shape
+    in_shape = img_in.shape
     w_shape = weights.shape
     out_shape = list(in_shape)
     out_shape[dim] = w_shape[0]
-    outimg = np.zeros(out_shape)
+    img_out = np.zeros(out_shape)
     if dim == 0:
         for i_img in range(in_shape[1]):
             for i_w in range(w_shape[0]):
                 w = weights[i_w, :]
                 ind = indices[i_w, :]
-                im_slice = inimg[ind, i_img].astype(np.float64)
-                outimg[i_w, i_img] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
+                im_slice = img_in[ind, i_img].astype(np.float64)
+                img_out[i_w, i_img] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
     elif dim == 1:
         for i_img in range(in_shape[0]):
             for i_w in range(w_shape[0]):
                 w = weights[i_w, :]
                 ind = indices[i_w, :]
-                im_slice = inimg[i_img, ind].astype(np.float64)
-                outimg[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
-    if inimg.dtype == np.uint8:
-        outimg = np.clip(outimg, 0, 255)
-        return np.around(outimg).astype(np.uint8)
+                im_slice = img_in[i_img, ind].astype(np.float64)
+                img_out[i_img, i_w] = np.sum(np.multiply(np.squeeze(im_slice, axis=0), w.T), axis=0)
 
-    return outimg
+    if img_in.dtype == np.uint8:
+        img_out = np.clip(outimg, 0, 255)
+        return np.around(img_out).astype(np.uint8)
+
+    return img_out
 
 
-def imresizevec(inimg, weights, indices, dim):
+def imresizevec(img_in, weights, indices, dim):
     """imresizevec function"""
     wshape = weights.shape
     if dim == 0:
         weights = weights.reshape((wshape[0], wshape[2], 1, 1))
-        outimg = np.sum(weights*((inimg[indices].squeeze(axis=1)).astype(np.float64)), axis=1)
+        img_out = np.sum(weights*((img_in[indices].squeeze(axis=1)).astype(np.float64)), axis=1)
     elif dim == 1:
         weights = weights.reshape((1, wshape[0], wshape[2], 1))
-        outimg = np.sum(weights*((inimg[:, indices].squeeze(axis=2)).astype(np.float64)), axis=2)
-    if inimg.dtype == np.uint8:
-        outimg = np.clip(outimg, 0, 255)
-        return np.around(outimg).astype(np.uint8)
+        img_out = np.sum(weights*((img_in[:, indices].squeeze(axis=2)).astype(np.float64)), axis=2)
 
-    return outimg
+    if in_img.dtype == np.uint8:
+        img_out = np.clip(img_out, 0, 255)
+        return np.around(img_out).astype(np.uint8)
+
+    return img_out
 
 
 def resizeAlongDim(A, dim, weights, indices, mode="vec"):
@@ -179,7 +181,7 @@ def imresize(img, scalar_scale=None, method='bicubic', output_shape=None, mode="
 
 
 def convertDouble2Byte(img):
-    """Fucntion to convert double data to byte"""
+    """Function to convert double data to byte"""
     img_out = np.clip(img, 0.0, 1.0)
     img_out = 255*img_out
     return np.around(img_out).astype(np.uint8)
