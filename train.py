@@ -739,8 +739,9 @@ def main():
     # Finally run results on the test set
     if not args.dr:
         test(test_loader, model, criterion, [pylogger], args=args, mode="ckpt")
-        test(test_loader, model, criterion, [pylogger], args=args, mode="best",
-             ckpt_name=checkpoint_name, local_rank=local_rank)
+        if not args.nas:
+            test(test_loader, model, criterion, [pylogger], args=args, mode="best",
+                 ckpt_name=checkpoint_name, local_rank=local_rank)
 
     if args.copy_output_folder and local_rank <= 0:
         msglogger.info('Copying output folder to: %s', args.copy_output_folder)
